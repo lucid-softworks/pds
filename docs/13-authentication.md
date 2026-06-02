@@ -7,16 +7,18 @@ header showed up" into "I know which account this is."
 
 The pieces that ship in this chapter:
 
-- `com.atproto.server.createSession` — log in with a password.
+- `com.atproto.server.createSession` — log in with a password (main or app).
 - `com.atproto.server.refreshSession` — trade a refresh JWT for a new pair.
 - `com.atproto.server.deleteSession` — log out.
 - `com.atproto.server.getSession` — "who am I?"
+- `com.atproto.server.createAppPassword` — mint a scoped alt credential.
+- `com.atproto.server.listAppPasswords` — enumerate them.
+- `com.atproto.server.revokeAppPassword` — delete one by name.
 - `com.atproto.identity.resolveHandle` — handle → DID.
 - `com.atproto.server.describeServer` — unauthenticated server discovery.
 - `src/pds/auth/middleware.ts` — the `requireAccessAuth` contract.
 
-App passwords and OAuth are mentioned but not implemented; they each get
-their own follow-on chapter.
+OAuth is mentioned but not implemented; it gets its own follow-on chapter.
 
 ## The session pair
 
@@ -203,15 +205,101 @@ own `auth` shape.
 
 ## App passwords
 
-The PDS supports **app passwords** — alternate credentials a user can
-generate from the official client for use in CLI tools, bots, and any
-third-party app that hasn't moved to OAuth. They're scoped (full-access
-vs. DM-only, etc.) and individually revocable.
+The PDS supports **app passwords** — alternate credentials a user can mint
+from the official client for use in CLI tools, bots, archival scripts, and
+any third-party app that hasn't moved to OAuth. They exist so that handing
+your password to a CLI never has to mean handing over the keys to the
+account; lose track of one, revoke it, the main login is untouched.
 
-We haven't built that yet. The hooks are in place — `refresh_tokens` has
-an `app_password_name` column that's null today — and a future chapter will
-wire up the `com.atproto.server.createAppPassword` and `listAppPasswords`
-endpoints alongside an extra column on the issuance flow.
+### Format
+
+The plaintext is `xxxx-xxxx-xxxx-xxxx`: four groups of four lowercase chars
+separated by dashes. The alphabet is 32 characters wide — a–z minus the
+look-alikes `l` and `o`, plus the digits 2–9 (we drop 0 and 1 for the same
+reason). 16 alphabet characters at 5 bits each gives ~80 bits of entropy,
+which is well clear of any practical brute-force budget against a scrypt
+hash. The dashes are pure UX — they make the string easier to read off a
+sticky note or paste from a password manager.
+
+### Server-generated, shown once
+
+Crucially, **the user does not choose the plaintext**. We generate it from
+`crypto.randomBytes` and return it in the `createAppPassword` response.
+After that, the only thing on disk is a `scrypt:v1:` hash, identical in
+format to the main password column — `verifyPassword` doesn't know or care
+which kind of credential it's checking. The client UX that wraps this MUST
+display the plaintext exactly once and tell the user to copy it now; we
+cannot recover it later, by design.
+
+This is the inverse of how a normal password works: there, the user picks
+something memorable and we hope it's strong. Here, we pick something strong
+and accept that nobody will memorise it.
+
+### The `privileged` flag
+
+Each app password carries a boolean: `privileged: true` means "this can do
+anything the account can do," and `false` means "no email-flow operations"
+— change email, request a password reset, that sort of thing. The
+upstream Bluesky PDS enforces this gate on the relevant handlers. **Our
+implementation records the flag but does not yet enforce it** — every email
+flow chapter is still to come, and we'll wire the check in when the
+endpoints land. Flagged as an upstream divergence.
+
+### Lifecycle
+
+1. **Create.** `com.atproto.server.createAppPassword` with an
+   authenticated access JWT and a `name` matching `/^[a-zA-Z0-9._-]{4,32}$/`.
+   The response includes the plaintext `password` — this is your one
+   chance. Name collisions per account return `Conflict` /
+   `AppPasswordNameExists`.
+2. **Use.** Pass it as `password` to `com.atproto.server.createSession`
+   exactly like the main password. The login flow tries the main hash
+   first, then walks the account's app-password rows. On a match, the new
+   refresh row is tagged with the app password's `name` in
+   `refresh_tokens.app_password_name`, and that tag is preserved across
+   every subsequent rotation — a session that logged in narrow stays
+   narrow.
+3. **List.** `com.atproto.server.listAppPasswords` returns
+   `{ name, createdAt, privileged }` for every row. The plaintext is
+   gone forever; this view is metadata only.
+4. **Revoke.** `com.atproto.server.revokeAppPassword` with `{ name }`
+   deletes the row. The endpoint is idempotent — re-revoking a name that's
+   already gone still returns 200. Existing refresh tokens minted under the
+   revoked name are left alone; they'll naturally die on next rotation
+   attempt only if you also drop them, which we don't yet do (TODO: cascade
+   revoke).
+
+### Try it
+
+```bash
+# Assume $ACCESS is a valid main-password access JWT from above.
+
+# Mint an app password
+NEW=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createAppPassword \
+  -H "authorization: Bearer $ACCESS" \
+  -H 'content-type: application/json' \
+  -d '{"name": "cli-tool"}')
+APP_PASSWORD=$(echo "$NEW" | jq -r .password)
+echo "save this, it won't be shown again: $APP_PASSWORD"
+
+# List
+curl -s http://localhost:3000/xrpc/com.atproto.server.listAppPasswords \
+  -H "authorization: Bearer $ACCESS" | jq
+
+# Log in with it (note: same endpoint as the main password)
+curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createSession \
+  -H 'content-type: application/json' \
+  -d "$(jq -n --arg pw "$APP_PASSWORD" '{identifier: "alice.test", password: $pw}')" | jq
+
+# Revoke (idempotent)
+curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.revokeAppPassword \
+  -H "authorization: Bearer $ACCESS" \
+  -H 'content-type: application/json' \
+  -d '{"name": "cli-tool"}' -i
+```
+
+After the revoke, the same `createSession` call will return
+`AuthenticationRequired`.
 
 ## OAuth
 
@@ -225,6 +313,120 @@ comes down to `Authorization: Bearer <jwt>`, but the JWT's `iss` is the
 PDS, the `sub` is the user, and the verification path is the same one
 already in `middleware.ts`. We just add a second JWT scope alongside
 `com.atproto.access`.
+
+## Email confirmation
+
+The AT Protocol expects a PDS to know whether an account's email address
+has actually been *reached* — separate from whether one was supplied. The
+spec doesn't make confirmation a hard prerequisite for everything, but it
+gates a few flows (password reset notifications, takedown appeals) and
+surfaces in `getSession` as the `emailConfirmed` boolean. We persist that
+bit as a nullable `email_confirmed_at` timestamp on `accounts`: NULL means
+unconfirmed; a date means it was confirmed at that moment.
+
+> ⚠️ **Difference from upstream.** The reference Bluesky PDS makes some
+> flows error out for unconfirmed accounts; ours doesn't, and
+> `createAccount` still happily mints a session without a verification
+> round-trip. We're divergent here on purpose — chapter 12 was supposed to
+> be about minting a first DID, not about email lifecycle — and we'll
+> close the gap when the takedown / appeals chapter lands. The plumbing
+> is all here; only the enforcement is missing.
+
+Two endpoints drive the flow:
+
+- `com.atproto.server.requestEmailConfirmation` — authenticated. Mints a
+  32-character token, writes it to `email_tokens` keyed by
+  `(did, 'confirm-email', token)`, and "sends" it to the account's current
+  address. Returns 200 with empty body if the address is already confirmed
+  — retries shouldn't be errors.
+- `com.atproto.server.confirmEmail` — authenticated. Takes `{ token }`,
+  looks it up by `(did, 'confirm-email', token)`, deletes the row on hit,
+  and sets `accounts.email_confirmed_at = now()`. Returns `InvalidToken`
+  (401) on miss or expiry.
+
+Tokens are 160 bits from `randomBytes(20)` rendered as RFC 4648 base32 (no
+padding). That's short enough to read aloud from an email, long enough
+that guessing is infeasible. Issuing a fresh token wipes any prior live
+token for the same (did, purpose) — only the newest is valid.
+
+## Email updates
+
+Changing an account's email address is the same machinery with a twist:
+the verification email goes to the *new* address, not the old one. That's
+the point. We can't trust that the user actually owns the address they
+typed in until they prove it by clicking through; sending the code to the
+address they currently have on file would only prove they still control
+the *old* one. Reversing direction proves the *new* one and is the same
+property OAuth attestation buys, just slower.
+
+- `com.atproto.server.requestEmailUpdate` — authenticated. Input
+  `{ email }`. We validate syntax, issue a token with `new_email`
+  populated on the row, and email the code to the new address.
+- `com.atproto.server.updateEmail` — authenticated. Input `{ token }`
+  (the lexicon also accepts the new email here; we trust the token row).
+  On match we set `accounts.email = new_email` and *clear*
+  `email_confirmed_at` back to NULL. The new address starts unconfirmed
+  by definition — the user has just demonstrated they own it, but a
+  follow-up `requestEmailConfirmation` cycle is what flips the bit
+  downstream consumers check.
+
+If the new address is already in use, the `UNIQUE` constraint on
+`accounts.email` fires and we surface a `Conflict` / `EmailNotAvailable`.
+
+## Password reset
+
+Forgotten-password flows can't require an authenticated caller — the whole
+point is the user lost the ability to authenticate. Two unauthenticated
+endpoints carry it:
+
+- `com.atproto.server.requestPasswordReset` — input `{ email }`. We look
+  the account up by email; if it exists we issue a one-hour reset token
+  and email it. **If it doesn't exist, we return 200 anyway.** Returning
+  a different status (or even a different latency profile) for "no
+  account" vs. "sent" would let an unauthenticated caller enumerate
+  accounts. The same defense-in-depth principle that makes login return
+  the same error for "no such handle" and "wrong password" applies here.
+- `com.atproto.server.resetPassword` — input `{ token, password }`. The
+  user is still unauthenticated, so we can't scope the lookup by DID; we
+  look the token up by `(purpose='reset-password', token)` instead — the
+  secondary index on `email_tokens.token` is there exactly for this. On
+  match we hash the new password and update `accounts.password_hash`.
+  Returns `InvalidToken` (400) on miss/expiry, `InvalidPassword` if the
+  new password is under eight characters.
+
+The reset TTL is one hour, much shorter than the 24-hour confirmation
+window. The threat model is different: a reset token in a phished inbox
+is a full account takeover, whereas a confirmation token only proves
+email reachability. The short window limits damage if the link is
+intercepted.
+
+Note what reset *doesn't* do: it doesn't invalidate the user's existing
+sessions. Refresh tokens stay on file, access tokens stay valid until
+they expire. A user who suspects their account was compromised needs to
+revoke sessions separately (`deleteSession` per device, or the
+all-sessions revocation we'll build alongside fuller app-password
+controls). This is the same trade-off the upstream PDS makes, and we
+may revisit it once we have a clearer notion of "rotate all credentials"
+as one user-facing operation.
+
+## The dev email sender
+
+`src/pds/auth/email_sender.ts` is a stub:
+
+```ts
+export async function sendEmail({ to, subject, body }): Promise<void> {
+  console.log(... structured banner with the body inline ...)
+}
+```
+
+It logs every "send" to the terminal with a clear divider so you can
+scroll back, find the token, and paste it into the next `curl`. There is
+no SMTP, no DKIM, no bounce handling. That's a feature for the dev loop
+— you don't need a mailserver to test the flow end to end — and a problem
+we deliberately defer to chapter 18, where we'll swap the body of this
+one function for a transactional provider call and the rest of the
+codebase won't notice. The function signature is the abstraction
+boundary.
 
 ## Try it
 
