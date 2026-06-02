@@ -31,6 +31,7 @@ import {
 import { createLocalPlc } from '~/pds/did/plc'
 import { hashPassword } from '~/pds/auth/password'
 import { createSessionTokens } from '~/pds/auth/session'
+import { emitIdentity, emitAccount } from '~/pds/sequencer/sequence'
 import { buildDidDocument, type DidDocument } from '~/pds/did/document'
 import { BadRequest, Conflict, XrpcError } from '~/pds/xrpc/errors'
 
@@ -92,6 +93,11 @@ export async function createAccount(
       did,
       signingKeyPriv: signingKey.privateKeyHex,
     })
+
+    // ── 7b. Announce the account on the firehose. Identity then account so
+    //        consumers see the handle binding before they see status.
+    await emitIdentity({ did, handle: input.handle })
+    await emitAccount({ did, active: true })
 
     // ── 8. Issue session ─────────────────────────────────────────────────
     const tokens = await createSessionTokens(did)
