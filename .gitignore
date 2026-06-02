@@ -1,0 +1,28 @@
+node_modules
+dist
+.output
+.vinxi
+.tanstack
+.nitro
+.cache
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+.idea
+.vscode
+coverage
+
+# Local dev data
+.data
+data/
+*.sqlite
+*.sqlite-journal
+*.db
+pgdata/
+.pglite/
+
+# Build artifacts
+build/
+public/build/

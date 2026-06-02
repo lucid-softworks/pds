@@ -1,0 +1,59 @@
+@import 'tailwindcss';
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-bg: #0b0d10;
+  --color-surface: #15181d;
+  --color-surface-2: #1c2026;
+  --color-border: #2a2f37;
+  --color-fg: #e6e8eb;
+  --color-fg-muted: #9aa3ad;
+  --color-accent: #7aa2f7;
+  --color-accent-2: #bb9af7;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+html, body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+:root {
+  color-scheme: dark;
+}
+
+/* Shiki code blocks render with inline styles; we just give them a frame. */
+.prose pre {
+  background: var(--color-surface) !important;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.prose code {
+  background: var(--color-surface-2);
+  padding: 0.125rem 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+}
+
+.prose pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 1em;
+}
+
+.prose a {
+  color: var(--color-accent);
+}
+
+.prose h2, .prose h3, .prose h4 {
+  scroll-margin-top: 5rem;
+}

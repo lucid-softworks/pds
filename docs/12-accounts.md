@@ -1,0 +1,339 @@
+# Account creation and did:plc
+
+This is the longest single endpoint in the PDS. Registering an account
+touches every load-bearing subsystem at least once: identity, signing,
+content-addressed storage, repository commits, session issuance. By the
+time it returns a 200 you've crossed almost the entire codebase. This
+chapter walks the full path.
+
+## The XRPC endpoint
+
+The contract is `com.atproto.server.createAccount`. The full upstream
+lexicon supports invites, recovery keys, account migration, and a
+caller-supplied PLC operation. We currently support the simplest variant —
+brand-new self-hosted account — and stub the rest.
+
+The request a Bluesky client sends looks roughly like:
+
+```http
+POST /xrpc/com.atproto.server.createAccount HTTP/1.1
+Content-Type: application/json
+
+{
+  "handle": "alice.test",
+  "email": "alice@example.com",
+  "password": "correcthorsebatterystaple"
+}
+```
+
+And the response we return:
+
+```json
+{
+  "did": "did:plc:g7k4q6y6jmrr3hgpwxs4f5n2",
+  "handle": "alice.test",
+  "accessJwt": "eyJhbGciOi...",
+  "refreshJwt": "eyJhbGciOi...",
+  "didDoc": {
+    "id": "did:plc:g7k4q6y6jmrr3hgpwxs4f5n2",
+    "alsoKnownAs": ["at://alice.test"],
+    "verificationMethod": [...],
+    "service": [...]
+  }
+}
+```
+
+By the time the client has those four strings it can use any account-
+authenticated XRPC method on this PDS.
+
+## The orchestration function
+
+`src/pds/account/create.ts` is the conductor. Its `createAccount(input)`
+function does the steps in order:
+
+```
+ ┌─ 1. Validate handle / email / password syntax
+ ├─ 2. Check uniqueness
+ ├─ 3. Generate signing keypair + rotation keypair
+ ├─ 4. Build + sign genesis PLC op → derive DID
+ ├─ 5. Hash password
+ ├─ 6. Insert account row
+ ├─ 7. Build empty MST + signed commit; persist blocks
+ └─ 8. Issue access + refresh JWTs
+```
+
+The handler in `src/pds/xrpc/handlers/com.atproto.server.createAccount.ts`
+is intentionally thin: validate input shape with zod, call `createAccount`,
+return its result. The actual logic is in `account/create.ts` so it can be
+unit-tested without an HTTP layer.
+
+Let's walk each step.
+
+## Step 1 — Validate
+
+`src/pds/did/handle.ts` enforces the [handle syntax
+rules](https://atproto.com/specs/handle):
+
+- 3–253 characters.
+- Lowercase ASCII alphanumeric + hyphens, no leading/trailing hyphens.
+- At least two labels (e.g. `alice.test`, never just `alice`).
+- TLD can't be numeric-only.
+
+Reserved TLDs (`.local`, `.invalid`, `.test`, ...) get a warning but aren't
+hard-blocked, because in dev we *want* `alice.test` to work. The real
+production check would reject those.
+
+Email gets a permissive regex (anything-at-anything-dot-anything). The
+password floor is 8 characters.
+
+> ⚠️ **Difference from upstream.** The reference PDS sends a verification
+> email and gates account activation until the user clicks the link. We
+> don't — accounts are active immediately. Email verification is a
+> follow-on chapter.
+
+## Step 2 — Uniqueness
+
+A simple `SELECT did FROM accounts WHERE handle = ?` and the same for
+email. Both columns have unique indexes (in `drizzle/0000_init.sql`), so
+even if two requests race past this check, the database insert in step 6
+will fail with a unique-violation that we surface as `Conflict`.
+
+## Step 3 — Generate keys
+
+Two keypairs:
+
+- **Signing key** — what the PDS uses to sign repo commits on the user's
+  behalf. Registered in the DID document's `verificationMethod[#atproto]`.
+  Lives forever (per account).
+- **Rotation key** — controls future PLC operations against this DID.
+  Conceptually it's the "root" key; if the user moves to a different PDS,
+  the rotation key is what authorizes the migration. The signing key can
+  be rotated; the rotation key can also be rotated, but with itself.
+
+Both are secp256k1 / k256 keypairs generated in `src/pds/repo/keys.ts`. The
+implementation is just `@noble/curves`:
+
+```ts
+const priv = secp256k1.utils.randomPrivateKey()
+const pub = secp256k1.getPublicKey(priv, true)  // compressed, 33 bytes
+```
+
+For wire/storage we encode the public key as a **Multikey**: a multicodec
+varint prefix (`0xe7 0x01` for secp256k1) plus the 33-byte compressed
+pubkey, then multibase-base58btc-encoded with a `z` prefix:
+
+```
+z6MkpTHR8VNsBxYAAWHut2Geadd9jSshBHR8VnogtoFp1RZ8r
+└┬┘ └────────────────────┬────────────────────┘
+ multibase z (base58btc)  varint(0xe7) || compressed-pubkey
+```
+
+The same encoding becomes the `did:key:` form simply by prepending the
+string: `did:key:z6Mk...`. We use that in the PLC operation, then strip the
+prefix to put the bare Multikey into the DID document.
+
+> ⚠️ **The signing keys are stored plaintext in Postgres.** In production
+> you'd wrap these in a KMS or an age-encrypted column. The teaching port
+> stores them as hex strings in `accounts.signing_key_priv` so you can see
+> the whole flow with one `SELECT`.
+
+## Step 4 — The PLC operation
+
+This is the conceptual centerpiece. In production, the PDS POSTs a signed
+"genesis operation" to plc.directory; the directory hashes the signed bytes
+to derive the DID, stores the op in an append-only log keyed by that DID,
+and from then on resolves the DID to its current document.
+
+Our `src/pds/did/plc.ts` builds the *same* operation with the *same*
+signature, but skips the POST. We persist the op locally in
+`plc_operations` and resolve our own DIDs by reading the `accounts` table
+back.
+
+The unsigned operation looks like:
+
+```ts
+{
+  type: "plc_operation",
+  rotationKeys: ["did:key:z6Mk... (rotation)"],
+  verificationMethods: { atproto: "did:key:z6Mk... (signing)" },
+  alsoKnownAs: ["at://alice.test"],
+  services: {
+    atproto_pds: {
+      type: "AtprotoPersonalDataServer",
+      endpoint: "https://this-pds.example"
+    }
+  },
+  prev: null
+}
+```
+
+We DAG-CBOR-encode that, sign the bytes with the rotation key
+(`signBytes(rotationKeyPriv, unsignedBlock.bytes)`), base64url-encode the
+signature, and append it as `sig`. Then we DAG-CBOR-encode the *signed* op
+and hash that with SHA-256. The first 15 bytes of the hash, base32-encoded
+and truncated to 24 characters, becomes the method-specific id of the DID:
+
+```
+did:plc:g7k4q6y6jmrr3hgpwxs4f5n2
+        └──── base32(sha256(signed-op))[..24] ────┘
+```
+
+> 📖 **Why two encodings?** The first encoding (unsigned op → bytes →
+> signature) is the cryptographic commitment: the signature is over those
+> specific bytes. The second encoding (signed op → bytes → hash → DID) is
+> the addressing scheme: the DID is the hash of *exactly* the bytes the
+> directory will store. So if the directory's bytes ever differ from ours,
+> we know — they don't hash to the same DID anymore.
+
+> ⚠️ **Difference from upstream.** Our DIDs aren't published. They're
+> resolvable from this PDS only. A relay would not be able to look them up.
+> Production deployment requires either (a) flipping `PDS_LOCAL_PLC=false`
+> and pointing at plc.directory, or (b) running your own PLC mirror. See
+> chapter 18 — Production.
+
+## Step 5 — Hash the password
+
+`src/pds/auth/password.ts` runs **scrypt** via `node:crypto`. Parameters:
+N=2^15, r=8, p=1 — roughly 32 MB memory, ~150ms on modern hardware. The
+stored format is versioned:
+
+```
+scrypt:v1:32768:8:1:<salt-b64>:<hash-b64>
+```
+
+Versioning the parameters means a future migration can re-hash with
+stronger settings (`scrypt:v2:...`) without breaking verification of
+existing rows; we keep both parsers around until the migration completes.
+
+> 📖 **Why scrypt, not argon2id?** Argon2id is the modern recommendation,
+> but every JS implementation requires a native build or a WASM bundle. For
+> a teaching project that should `pnpm install` cleanly with zero native
+> compilation, `node:crypto.scrypt` wins. The cost is that argon2's
+> memory-hardness against custom ASICs is stronger; that matters more in
+> 2026 than it did in 2016, but scrypt is still a perfectly acceptable
+> floor.
+
+## Step 6 — Insert the account row
+
+A single `INSERT INTO accounts (...) VALUES (...)`. The unique indexes on
+`handle` and `email` are the last line of defense against races; if
+they fail, we catch and surface `Conflict`.
+
+## Step 7 — Build the empty signed repo
+
+This is where the codec, MST, and commit modules earn their keep.
+
+The repository starts empty. Per the spec, an empty MST is still a real
+node — `{ l: null, e: [] }` — which we DAG-CBOR encode and CID via
+`src/pds/repo/mst.ts → emptyMst()`. That gives us our `data` CID.
+
+Then `src/pds/repo/commit.ts → buildSignedCommit({ did, data, rev, signingKeyPriv })`
+builds the commit object, signs the unsigned bytes with the signing key,
+and re-encodes the signed result:
+
+```ts
+const unsigned = { did, version: 3, data, rev, prev: null }
+const unsignedBlock = await encode(unsigned)
+const sig = signBytes(signingKeyPriv, unsignedBlock.bytes)
+const signed = { ...unsigned, sig }
+return await encode(signed)
+```
+
+The CID of the *signed* commit is the repo's root CID. Both blocks (the
+empty MST node + the signed commit) go into `repo_blocks`. The `repos`
+table gets a single row recording `(did, root_cid, rev)`.
+
+> 📖 **Why store the unsigned + signed forms separately for hashing?**
+> Because the signature has to be over deterministic bytes. If we just
+> said "sign the dict containing sig=null and then replace null with the
+> sig," any encoder difference (key ordering, length encoding) would break
+> verification. Encoding twice — once without `sig` to sign, once with
+> `sig` to publish — sidesteps it entirely.
+
+## Step 8 — Issue the session
+
+`src/pds/auth/session.ts → createSessionTokens(did)`:
+
+1. Mint an **access JWT** (HS256, 2 hour expiry, scope
+   `com.atproto.access`, subject = DID).
+2. Mint a **refresh JWT** (HS256, 60 day expiry, scope
+   `com.atproto.refresh`).
+3. Insert the refresh token's `jti` into `refresh_tokens` so we can revoke
+   it later (logout, password change, suspicion).
+
+Access tokens are *not* stored; they're stateless to verify. Only refresh
+tokens have a server-side record, because revocation is the only thing that
+makes refresh tokens better than access tokens.
+
+The two JWTs are returned alongside the user's DID and the freshly-built
+DID document. The client now has everything it needs.
+
+## Failure handling
+
+The function is *almost* idempotent but not quite — we don't wrap steps 6
+through 8 in a Drizzle transaction. So the windows where a partial failure
+could leave dangling state are:
+
+1. **PLC op written, account row insert fails.** We catch and best-effort
+   delete the orphan `plc_operations` row. Idempotency tag: the DID will
+   be a different hash if the user retries (the rotation key is freshly
+   generated), so no collision.
+2. **Account row inserted, repo creation fails.** The next time the user
+   creates an account it'll fail with `HandleNotAvailable`. We catch and
+   delete the account row; the FK cascade also clears any partial
+   `repo_blocks`.
+3. **Repo committed, JWT issuance fails.** This is the awkward one — the
+   account exists, the repo exists, but the user didn't get tokens. They
+   can call `createSession` with the password they just set and proceed.
+
+A proper transaction is a follow-up chapter. The shape of `createAccount`
+makes it straightforward to wrap once we have the transaction primitives in
+place.
+
+## Try it
+
+After `pnpm db:migrate && pnpm dev`:
+
+```bash
+curl -i -X POST http://localhost:3000/xrpc/com.atproto.server.createAccount \
+  -H 'content-type: application/json' \
+  -d '{
+    "handle": "alice.test",
+    "email": "alice@example.com",
+    "password": "correcthorsebatterystaple"
+  }'
+```
+
+You should see a 200 with a JSON body containing your new DID, handle, two
+JWTs, and the DID document. Try the same call twice — the second one
+should 409 with `HandleNotAvailable`.
+
+To inspect the state:
+
+```bash
+DATABASE_URL=pglite pnpm drizzle-kit studio
+```
+
+…and browse `accounts`, `repos`, `repo_blocks`, `plc_operations`,
+`refresh_tokens`.
+
+## Exercises
+
+1. The genesis PLC op is signed with the *rotation* key, not the signing
+   key. Why? What would break if we used the signing key?
+2. Read the bytes of an MST block (`SELECT bytes FROM repo_blocks WHERE
+   size < 30 LIMIT 1`). Decode it as DAG-CBOR by hand — you should get
+   `{ l: null, e: [] }`.
+3. Verify a signed commit yourself: fetch its bytes from `repo_blocks`,
+   strip the `sig` field, re-encode, and check the signature against the
+   account's `signing_key_pub`. (The plumbing for this exists in
+   `commit.ts → verifyCommit`.)
+4. Why is the password floor 8 characters? What attack does that defend
+   against, and what attack does it *not* defend against?
+
+## Up next
+
+We have authenticated sessions. The next two chapters fill in [13 —
+Authentication](./13-authentication.md) (refresh, logout, app passwords)
+and [14 — Records](./14-records.md) (actually putting data into the empty
+repo we just created).
