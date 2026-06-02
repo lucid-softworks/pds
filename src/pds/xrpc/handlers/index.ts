@@ -23,6 +23,12 @@ import * as requestEmailUpdate from './com.atproto.server.requestEmailUpdate'
 import * as updateEmail from './com.atproto.server.updateEmail'
 import * as requestPasswordReset from './com.atproto.server.requestPasswordReset'
 import * as resetPassword from './com.atproto.server.resetPassword'
+// account lifecycle
+import * as checkAccountStatus from './com.atproto.server.checkAccountStatus'
+import * as deactivateAccount from './com.atproto.server.deactivateAccount'
+import * as activateAccount from './com.atproto.server.activateAccount'
+import * as requestAccountDelete from './com.atproto.server.requestAccountDelete'
+import * as deleteAccount from './com.atproto.server.deleteAccount'
 // identity
 import * as resolveHandle from './com.atproto.identity.resolveHandle'
 // repo
@@ -60,6 +66,11 @@ export const registry = new HandlerRegistry()
   .register(updateEmail.nsid, updateEmail.def)
   .register(requestPasswordReset.nsid, requestPasswordReset.def)
   .register(resetPassword.nsid, resetPassword.def)
+  .register(checkAccountStatus.nsid, checkAccountStatus.def)
+  .register(deactivateAccount.nsid, deactivateAccount.def)
+  .register(activateAccount.nsid, activateAccount.def)
+  .register(requestAccountDelete.nsid, requestAccountDelete.def)
+  .register(deleteAccount.nsid, deleteAccount.def)
   .register(resolveHandle.nsid, resolveHandle.def)
   .register(createRecord.nsid, createRecord.def)
   .register(putRecord.nsid, putRecord.def)
