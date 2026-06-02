@@ -310,13 +310,15 @@ and performance isn't a bottleneck at PDS scale.)
 
 ## What's still missing
 
-> 🚧 The validator and bundle now live in `src/pds/lexicon/`
-> (`types.ts`, `loader.ts`, `validate.ts`, plus a `bundled/` tree of
-> JSON), but they are **not yet wired into the XRPC dispatcher**.
-> Handlers still validate by hand with `zod`
-> (look at `src/pds/xrpc/handlers/com.atproto.server.createAccount.ts`).
-> Cutting the dispatcher over is a follow-up — the validator just
-> needed to exist first.
+> 🚧 The validator now runs alongside every XRPC request via
+> `src/pds/xrpc/lexicon-bridge.ts`. On each call we look up the
+> lexicon for the NSID and validate input, params, and output against
+> its schemas. **Today's mode is observe-only**: mismatches log
+> `[lexicon:input] <nsid>: <reason>` but don't fail the request —
+> handlers still own validation through their hand-rolled `zod`
+> schemas. Setting `LEXICON_STRICT=true` in the environment flips the
+> observer to a hard rejection, which is the next step once the log
+> goes quiet and the stub lexicons are fully transcribed.
 
 Today: of the 36 bundled lexicons, six are transcribed in full
 (`app.bsky.feed.post`, `app.bsky.actor.profile`, `app.bsky.richtext.facet`,

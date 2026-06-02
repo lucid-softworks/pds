@@ -2,10 +2,15 @@
 //
 // Handlers register against an NSID; the dispatcher routes requests by NSID
 // and translates thrown XrpcErrors into the `{ error, message }` envelope.
-// Lexicon-driven validation will land in a later chapter — for now, handlers
-// validate their own input with a small zod schema.
+//
+// Lexicon validation runs alongside the handler's hand-rolled zod schemas
+// (see lexicon-bridge.ts). Today it's observe-only: mismatches log, the
+// handler still owns the contract. Setting `LEXICON_STRICT=true` turns the
+// observe-only check into a hard rejection. The plan for chapter 9's
+// follow-up is to flip that env var once the log is clean.
 
 import { XrpcError, InternalError, BadRequest, NotFound } from './errors'
+import { validateInbound, validateOutbound } from './lexicon-bridge'
 
 export type HandlerCtx = {
   /** The parsed JSON body for procedures, or undefined for queries. */
@@ -77,16 +82,24 @@ export async function dispatch(
 
   try {
     const input = await readJsonBody(request)
+
+    // Validate against the lexicon (observe-only unless LEXICON_STRICT=true).
+    await validateInbound(nsid, { input, params })
+
     const output = await def.handler({
       input,
       params,
       authorization: request.headers.get('authorization') ?? undefined,
       request,
     })
+
     // Binary handlers (e.g. sync.getRepo, sync.getBlob) build their own
     // Response so they can stream CAR / blob bytes; pass it through unchanged
     // rather than JSON-stringifying it.
     if (output instanceof Response) return output
+
+    await validateOutbound(nsid, output)
+
     return new Response(
       output === undefined ? '' : JSON.stringify(output),
       {

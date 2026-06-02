@@ -259,21 +259,35 @@ memory.
 > request/response. Upgrades to long-lived streams need their own
 > wiring.
 
-## What the lexicon validator will add
+## How the lexicon validator hooks in
 
-Today, every handler validates its own input with hand-written zod. When
-the lexicon validator from chapter 9 lands, two things change:
+The dispatcher calls `validateInbound` before the handler and
+`validateOutbound` after it — both from
+`src/pds/xrpc/lexicon-bridge.ts`. They look the NSID up in the bundled
+catalog, compile the schemas once (cached forever), and run them on
+each request.
 
-1. The dispatcher consults the lexicon for the NSID to validate input *and
-   output* automatically. The handler gets typed input; its return value
-   is validated before being sent.
-2. Errors declared in the lexicon's `errors` array become typed `XrpcError`
-   subclasses generated at build time. Throwing the wrong error name
-   becomes a compile error.
+Today the bridge is **observe-only**: a mismatch logs
+`[lexicon:input] com.atproto.server.createAccount: handle: missing
+required field` and otherwise lets the handler run normally. Handlers
+still own validation through `zod` schemas they wrote by hand.
 
-Neither is in place yet. But the seam is — the dispatcher's input-passing
-shape and the per-handler return shape are exactly what a typed validator
-plugs into.
+To turn the observer into a hard reject, set `LEXICON_STRICT=true` in
+the environment. The validator's `ValidationError` becomes an HTTP 400
+`InvalidRequest` response and the handler doesn't run. We don't flip
+that by default yet because:
+
+1. ~half the bundled lexicons are still stubs (`"main": {"type":
+   "object"}`) and would reject everything. We'd lose endpoints until
+   those are transcribed.
+2. The query-param coerce step in the bridge is best-effort
+   (`true/false/123` get typed; everything else stays a string).
+   That's good enough to observe; we want a proper type-aware decoder
+   before rejecting on it.
+
+The next two steps — finish transcribing the stubs and replace the
+zod schemas with lexicon-driven inputs — are chapter 9's "what's next."
+The seam already exists; the migration is mechanical.
 
 ## Try it
 
