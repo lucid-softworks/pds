@@ -1,0 +1,14 @@
+{
+  "lexicon": 1,
+  "id": "com.atproto.server.refreshSession",
+  "description": "TODO: full schema in a future session.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "input": {
+        "encoding": "application/json",
+        "schema": { "type": "object", "properties": {} }
+      }
+    }
+  }
+}

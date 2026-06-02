@@ -1,0 +1,12 @@
+{
+  "lexicon": 1,
+  "id": "app.bsky.graph.follow",
+  "description": "TODO: full schema in a future session. Stub allows the lexicon catalog to resolve refs to this NSID without breaking the validator.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": { "type": "object", "properties": {} }
+    }
+  }
+}

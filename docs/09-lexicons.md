@@ -310,13 +310,32 @@ and performance isn't a bottleneck at PDS scale.)
 
 ## What's still missing
 
-> 🚧 The validator and bundle landing are a future session. Until then,
-> handlers validate their input by hand (with `zod`, look at
-> `src/pds/xrpc/handlers/com.atproto.server.createAccount.ts`). When the
-> validator ships, those zod schemas come out and the lexicon takes over.
+> 🚧 The validator and bundle now live in `src/pds/lexicon/`
+> (`types.ts`, `loader.ts`, `validate.ts`, plus a `bundled/` tree of
+> JSON), but they are **not yet wired into the XRPC dispatcher**.
+> Handlers still validate by hand with `zod`
+> (look at `src/pds/xrpc/handlers/com.atproto.server.createAccount.ts`).
+> Cutting the dispatcher over is a follow-up — the validator just
+> needed to exist first.
 
-The shape is settled, though. By the time the validator lands you'll
-already know what it's doing and why.
+Today: of the 36 bundled lexicons, six are transcribed in full
+(`app.bsky.feed.post`, `app.bsky.actor.profile`, `app.bsky.richtext.facet`,
+all three `app.bsky.embed.*`, plus a handful of `com.atproto.*` defs +
+`com.atproto.server.createAccount` / `createSession` and
+`com.atproto.repo.createRecord` / `getRecord` / `strongRef`). The rest
+are stubs marked `"TODO: full schema in a future session."` — enough that
+refs into them resolve, not enough to actually constrain anything.
+
+## Try it
+
+```bash
+pnpm tsx -e "import('./src/pds/lexicon/selfTest').then(m => m.runLexiconSelfTest())"
+```
+
+That loads the bundled catalog, compiles `app.bsky.feed.post`'s schema,
+and runs four cases through the validator (valid post; missing
+`text`; over `maxGraphemes`; a 1-grapheme family-emoji ZWJ sequence).
+It prints `all self-tests passed` when the runtime is healthy.
 
 ## Exercises
 
@@ -338,7 +357,8 @@ already know what it's doing and why.
 ## Up next
 
 [Chapter 10 — XRPC](./10-xrpc.md) walks the HTTP dispatcher that turns
-incoming requests into handler calls — and that will eventually consult
-the lexicon validators built on top of what we covered here.
+incoming requests into handler calls. A later session swaps each
+handler's hand-written `zod` schema for a lookup into the lexicon
+catalog this chapter just built.
 
 ← [08 — CAR files](./08-car-files.md) · → [10 — XRPC](./10-xrpc.md)

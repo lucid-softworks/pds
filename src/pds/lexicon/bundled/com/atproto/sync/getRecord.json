@@ -1,0 +1,14 @@
+{
+  "lexicon": 1,
+  "id": "com.atproto.sync.getRecord",
+  "description": "TODO: full schema in a future session.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "output": {
+        "encoding": "application/json",
+        "schema": { "type": "object", "properties": {} }
+      }
+    }
+  }
+}
