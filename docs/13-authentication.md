@@ -428,6 +428,111 @@ one function for a transactional provider call and the rest of the
 codebase won't notice. The function signature is the abstraction
 boundary.
 
+## Account lifecycle
+
+Creating an account isn't the end of the story. A real user wants to be
+able to pause an account, come back to it, and — eventually, deliberately
+— destroy it. Five endpoints round out that lifecycle, and they're all
+driven by a single column we've been quietly carrying since chapter 12:
+`accounts.status`. It's the state machine.
+
+```
+            createAccount
+                 │
+                 ▼
+              active ───── takendown (admin only, ch 18)
+              ▲   │
+   activateAccount │ deactivateAccount
+              │   ▼
+            deactivated
+                 │
+                 ▼ (delete flow)
+              deleted
+```
+
+Four values, three user-driven transitions, one admin-driven one. Every
+authenticated endpoint runs through `requireAccessAuth`, and the
+middleware enforces the only useful invariant: by default it rejects any
+status other than `active`. `takendown` and `deleted` are server-side
+disabled, never reachable. `deactivated` is the interesting case — a user
+who deactivated themselves still needs a path back, and they need to be
+able to see their own state to decide what to do. We added an
+`AuthOptions.allowDeactivated` flag for those two specific endpoints:
+
+```ts
+const me = await requireAccessAuth(authorization, { allowDeactivated: true })
+```
+
+That's the only relaxation. Takedown and deleted remain unconditional 403s.
+
+### checkAccountStatus and the deactivate/activate pair
+
+`com.atproto.server.checkAccountStatus` is the read side of the state
+machine. It opts into `allowDeactivated`, looks the row up, and returns
+`{ did, handle, email, emailConfirmed, status, active }`. The upstream
+lexicon allows expensive informational fields (`expectedRecords`,
+`expectedBlocks`, …) for migration tooling; we deliberately omit them —
+they'd cost a repo scan per call and we don't have a migration story yet.
+
+`com.atproto.server.deactivateAccount` flips `status` to `'deactivated'`
+and emits an `#account { active: false, status: 'deactivated' }` event on
+the firehose. Refresh tokens stay alive on purpose: the user is going to
+need them when they come back. The lexicon also accepts a `deleteAfter`
+ISO timestamp for a "schedule a delete in N days unless I reactivate"
+workflow; we accept the field for shape compatibility but ignore it for
+now — there's no scheduler in the teaching surface.
+
+`com.atproto.server.activateAccount` is the inverse: `status` back to
+`'active'`, `#account { active: true }` event. Re-activating an
+already-active account is a no-op (200, empty body) rather than an
+error — clients hitting this on retry shouldn't trip a hard failure.
+
+### The delete flow
+
+Account deletion is the only XRPC operation in this codebase that's truly
+irreversible, so it takes the only two-step path of any endpoint here:
+
+1. **`com.atproto.server.requestAccountDelete`** — authenticated. Mints a
+   `delete-account` token in `email_tokens` and emails it to the
+   account's address. The TTL is one hour, the same threat-model
+   reasoning as password reset: a token in a phished inbox is full
+   account loss, so the window is tight.
+2. **`com.atproto.server.deleteAccount`** — authenticated. Input is
+   `{ did, password, token }`. Three independent proofs converge:
+   - The access JWT (middleware).
+   - `input.did === me.did` — a leaked access JWT can't be retargeted
+     by lying in the body.
+   - A fresh `verifyPassword` against the stored main-password hash.
+     App passwords don't open this door; only the main credential does.
+   - `consumeEmailToken({ purpose: 'delete-account', token })`.
+
+Belt, braces, and a third belt. Compare with `deactivateAccount`, which
+needs only the access JWT — the two endpoints are deliberately
+asymmetric, because deactivation is reversible and deletion is not.
+
+On success, we **mark** the account as `'deleted'` rather than running a
+hard `DELETE FROM accounts`. Doing a hard delete would cascade through
+every `ON DELETE CASCADE` FK pointing at `accounts.did` (repos,
+repo_blocks, refresh_tokens, plc_operations, records, record_blobs,
+blobs, app_passwords, email_tokens) and there'd be no path back. Marking
+preserves the DID/handle pair, keeps the PLC log queryable, and matches
+the protocol's "account deleted, DID survives" semantic — which is
+exactly what other PDSes and the upstream relay expect to see on the
+firehose.
+
+Two firehose events go out: an `#account { active: false, status:
+'deleted' }` so downstream consumers update their cached state, and a
+`#tombstone { did }` that tells them to drop any data they were holding
+for this DID. `emitTombstone` lives in `src/pds/sequencer/sequence.ts`
+next to the other emit helpers.
+
+A note on what delete *doesn't* do today: it doesn't revoke outstanding
+refresh tokens or pre-mint a forwarding pointer to a new PDS. The first
+is a defensible omission (the next call to `requireAccessAuth` will 403
+on the deleted status anyway, before the JWT even gets checked against
+its DID's row); the second is the entire account-migration chapter and
+lives further out.
+
 ## Try it
 
 After `pnpm db:migrate && pnpm dev`, in another shell:

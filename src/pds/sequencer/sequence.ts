@@ -119,6 +119,25 @@ export async function emitAccount(event: AccountEvent): Promise<number> {
   return seq
 }
 
+/** Record a `#tombstone` event and return its assigned seq number.
+ *
+ *  Emitted alongside the final `#account { status: 'deleted' }` event from
+ *  deleteAccount. Firehose consumers use it as the signal to drop any state
+ *  they were caching for this DID — its repo is gone for good. */
+export async function emitTombstone(args: {
+  did: string
+  time?: Date
+}): Promise<number> {
+  const seq = await reserveSeq(args.did, '#tombstone')
+  const payload = {
+    seq,
+    did: args.did,
+    time: (args.time ?? new Date()).toISOString(),
+  }
+  await writeEvent(seq, payload)
+  return seq
+}
+
 /** Retrieve events after `cursor` (exclusive), up to `limit` rows (default
  *  500). Used by the WebSocket firehose for historical replay on connect. */
 export async function readEventsSince(args: {

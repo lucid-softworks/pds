@@ -14,7 +14,11 @@ import { db } from '~/lib/db'
 import { emailTokens, type EmailToken } from '~/lib/db/schema'
 import { Unauthorized } from '~/pds/xrpc/errors'
 
-export type EmailPurpose = 'confirm-email' | 'update-email' | 'reset-password'
+export type EmailPurpose =
+  | 'confirm-email'
+  | 'update-email'
+  | 'reset-password'
+  | 'delete-account'
 
 const DEFAULT_TTL_SECONDS: Record<EmailPurpose, number> = {
   'confirm-email': 60 * 60 * 24,
@@ -22,6 +26,9 @@ const DEFAULT_TTL_SECONDS: Record<EmailPurpose, number> = {
   // Password resets are the highest-value flow and the most likely to be
   // phished out of an inbox; a one-hour window is the spec's recommendation.
   'reset-password': 60 * 60,
+  // Account deletion is irreversible; keep the window tight, same reasoning
+  // as reset-password.
+  'delete-account': 60 * 60,
 }
 
 export async function issueEmailToken(args: {

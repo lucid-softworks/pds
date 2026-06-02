@@ -11,7 +11,7 @@
 import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db'
 import { accounts, refreshTokens } from '~/lib/db/schema'
-import { Unauthorized } from '~/pds/xrpc/errors'
+import { Forbidden, Unauthorized } from '~/pds/xrpc/errors'
 import { verifyAccessToken, verifyRefreshToken } from './jwt'
 import { assertAccountActive } from './session'
 
@@ -22,14 +22,24 @@ export type AuthenticatedAccount = {
   status: string
 }
 
+/** Per-call relaxations of the default "must be active" gate. Takendown and
+ *  deleted accounts are never reachable through any of these — only the
+ *  reversible `deactivated` state can be opted into, and only for endpoints
+ *  that explicitly need it (checkAccountStatus, activateAccount). */
+export type AuthOptions = {
+  /** Allow callers whose account is currently `deactivated`. Default false. */
+  allowDeactivated?: boolean
+}
+
 /** Validate the Authorization header's access JWT and return the account.
  *  Throws XrpcError on missing / invalid / suspended. */
 export async function requireAccessAuth(
   authorization: string | undefined,
+  opts?: AuthOptions,
 ): Promise<AuthenticatedAccount> {
   const token = parseBearer(authorization)
   const claims = await verifyAccess(token)
-  return loadActiveAccount(claims.sub)
+  return loadAccount(claims.sub, opts)
 }
 
 /** Same but for refresh tokens (used by refreshSession / deleteSession). */
@@ -53,11 +63,12 @@ export async function requireRefreshAuth(
  *  Still throws on invalid. */
 export async function optionalAccessAuth(
   authorization: string | undefined,
+  opts?: AuthOptions,
 ): Promise<AuthenticatedAccount | null> {
   if (!authorization || authorization.trim().length === 0) return null
   const token = parseBearer(authorization)
   const claims = await verifyAccess(token)
-  return loadActiveAccount(claims.sub)
+  return loadAccount(claims.sub, opts)
 }
 
 function parseBearer(authorization: string | undefined): string {
@@ -88,7 +99,10 @@ async function verifyRefresh(token: string) {
   }
 }
 
-async function loadActiveAccount(did: string): Promise<AuthenticatedAccount> {
+async function loadAccount(
+  did: string,
+  opts?: AuthOptions,
+): Promise<AuthenticatedAccount> {
   const rows = await db
     .select({
       did: accounts.did,
@@ -104,6 +118,23 @@ async function loadActiveAccount(did: string): Promise<AuthenticatedAccount> {
     // JWT verified but the account is gone — treat as a stale token.
     throw Unauthorized('account no longer exists', 'InvalidToken')
   }
+  // Active is always fine. Deactivated is fine *if* the caller opted in
+  // (the only endpoints that do are checkAccountStatus and activateAccount —
+  // a user who deactivated their account still needs a way out). Takendown
+  // and deleted are server-side disabled, never reachable through XRPC auth.
+  if (acct.status === 'active') return acct
+  if (acct.status === 'deactivated' && opts?.allowDeactivated) return acct
+  if (acct.status === 'deactivated') {
+    throw Forbidden('account is deactivated', 'AccountDeactivated')
+  }
+  if (acct.status === 'takendown') {
+    throw Forbidden('account is takendown', 'AccountTakedown')
+  }
+  if (acct.status === 'deleted') {
+    throw Forbidden('account is deleted', 'AccountDeleted')
+  }
+  // Anything else (e.g. 'suspended') — defer to the shared helper for the
+  // canonical error name.
   assertAccountActive(acct)
   return acct
 }
