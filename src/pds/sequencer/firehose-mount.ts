@@ -30,22 +30,29 @@ type FirehoseClient = {
 
 /** Attach the firehose WebSocket handler to a Node HTTP server. */
 export async function attachFirehose(
-  server: NonNullable<ViteDevServer['httpServer']>,
+  vite: ViteDevServer,
 ): Promise<void> {
+  if (!vite.httpServer) return
+  const server = vite.httpServer
+
   // Lazy imports via an opaque specifier: see header note about config
   // bundling and `~/*` aliases. esbuild (which Vite uses to bundle the
   // config) statically follows even concatenated relative specifiers like
   // `'./fire' + 'hose'`. Routing the import through a runtime `Function`
   // defeats the scanner so the `~/*`-using `./firehose` module is never
   // inlined into the config bundle.
+  //
+  // We then load `./firehose` through Vite's SSR module graph so its own
+  // `~/*` imports resolve via the user's plugins (vite-tsconfig-paths).
   const load = new Function(
     'spec',
     'return import(spec)',
   ) as (spec: string) => Promise<unknown>
-  const firehoseUrl = new URL('./firehose.ts', import.meta.url).href
   const wsMod = (await load('ws')) as typeof import('ws')
   const { WebSocketServer } = wsMod
-  const firehoseMod = (await load(firehoseUrl)) as typeof import('./firehose')
+  const firehoseMod = (await vite.ssrLoadModule(
+    new URL('./firehose.ts', import.meta.url).pathname,
+  )) as typeof import('./firehose')
   const { streamFirehose } = firehoseMod
 
   const wss = new WebSocketServer({ noServer: true })
@@ -106,8 +113,7 @@ export function firehoseVitePlugin(): Plugin {
       // `httpServer` is null when Vite is in middlewareMode — we're not,
       // so this is defined for `vite dev`. We fire-and-forget the async
       // attach; any failure is logged and the dev server continues.
-      if (!server.httpServer) return
-      attachFirehose(server.httpServer).catch((err) => {
+      attachFirehose(server).catch((err) => {
         console.error('[firehose] failed to attach WebSocket handler', err)
       })
     },
