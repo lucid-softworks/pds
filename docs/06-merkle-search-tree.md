@@ -73,7 +73,7 @@ at the same level.
 The expected branching factor depends on the byte-comparison threshold the
 spec picks. The AT Protocol uses **base-16 (one nibble) per depth level**:
 
-- Depth 0: ~16/16 of keys (most).
+- Depth 0: ~15/16 of keys (most).
 - Depth 1: ~1/16 of keys.
 - Depth 2: ~1/256.
 - And so on.
@@ -81,10 +81,11 @@ spec picks. The AT Protocol uses **base-16 (one nibble) per depth level**:
 So an MST with a million keys is expected to be ~5 levels deep. Cheap to
 walk, cheap to diff.
 
-> **In code:** the `leadingZerosOnHash(key)` function in
-> `src/pds/repo/mst.ts` (lands with this chapter's session) counts leading
-> zeros divided by 4. So a hash whose first nibble is `0` gives depth 1; a
-> hash whose first byte is `0x00` gives depth 2.
+> **In code:** `leadingZerosOnHash(key)` in `src/pds/repo/mst.ts` counts
+> leading zero hex characters of the SHA-256 hash. So a hash whose first
+> nibble is non-zero gives depth 0; one starting with `0a…` gives depth 1;
+> one starting with `00a…` gives depth 2; one starting with `000a…` gives
+> depth 3.
 
 ## Inserting a key
 
@@ -190,48 +191,223 @@ That's *generous*. A commit ships the new root + every block that changed.
 For a single-post write, that's 1 leaf + ~4 internal nodes ≈ 1 KB of CAR
 data on the firehose. Cheap.
 
-## Where the implementation will live
+---
 
-`src/pds/repo/mst.ts` will hold the algorithm. The shape we're targeting:
+## The implementation
+
+`src/pds/repo/mst.ts` exposes:
 
 ```ts
 export class MST {
-  // Construction
   static empty(): MST
-  static load(rootCid: CID, store: BlockStore): MST
-  
-  // Reading
-  async get(key: string): Promise<CID | null>
-  async list(prefix: string, opts?: { limit?: number; after?: string }): AsyncIterable<{ key: string; cid: CID }>
-  
-  // Writing — returns a *new* MST; the old one is unchanged.
-  async add(key: string, value: CID): Promise<MST>
-  async update(key: string, value: CID): Promise<MST>
-  async delete(key: string): Promise<MST>
-  
-  // Persistence
-  async root(): Promise<{ cid: CID; blocks: Block[] }>
-  
-  // Diff
-  static async diff(prev: MST, next: MST): Promise<MstDiff>
+  static load(rootCid: CID, store: BlockStore): Promise<MST>
+  static diff(prev: MST, next: MST): Promise<MstDiff>
+
+  get(key: string): Promise<CID | null>
+  add(key: string, value: CID): Promise<MST>
+  update(key: string, value: CID): Promise<MST>
+  delete(key: string): Promise<MST>
+  list(opts?: { prefix?; limit?; reverse?; cursor? }): AsyncIterable<{ key, cid }>
+  getRoot(): Promise<{ cid: CID; blocks: Block[] }>
 }
 ```
 
-It's immutable: every write returns a new MST handle. That mirrors how the
-underlying tree works (because we're rebuilding the path on every write
-anyway, mutating in place gains nothing).
+Every mutating method returns a **new** `MST` — the old one is unchanged.
+We rebuild the path on every write anyway, so this immutability is free.
+
+`BlockStore` is a one-method interface (`getBlock(cid) → bytes | null`).
+The MST module never touches the database directly; the caller wires up
+whatever store they want. That makes the module pure and testable.
+
+### Internal node representation
+
+The on-wire shape (`l: CID | null`, `e: Array<{p, k, v, t}>`) is awkward to
+manipulate directly. The right-subtree pointer is glued onto its
+predecessor leaf, which means inserting a new leaf in the middle of a node
+forces you to re-glue pointers to different leaves.
+
+Internally we use a flat interleaved list:
+
+```ts
+type NodeEntry = Leaf | Pointer
+type Leaf    = { kind: 'leaf';    key: string; value: CID }
+type Pointer = { kind: 'tree';    tree: Tree }
+```
+
+So the node `[ptr0, b→cidB, ptr1, d→cidD, ptr2]` is just an array of five
+entries. Inserting a leaf becomes "splice it into the right slot"; merging
+two pointers after a delete becomes "concatenate two entry arrays".
+`serialize()` walks this list and emits the `{ l, e }` shape; `expandNode()`
+does the reverse on load.
+
+`Tree` is a tiny wrapper that caches its CID + bytes once computed, and
+faults itself in from the `BlockStore` on first access. Crucially, when a
+mutation copies an unchanged child pointer, the underlying `Tree` is reused
+— so `getCid()` returns the cached CID without re-encoding. That's how we
+get the "only touched blocks come back as new" property: untouched nodes
+are never even decoded, much less re-encoded.
+
+### `add` walks the depth, splitting on the way down
+
+The `add` flow has three cases, matched by the current node's depth vs. the
+new key's target depth:
+
+1. **`node.depth === keyDepth`** — the leaf belongs in this node. Find the
+   correct sorted position. If a subtree pointer sits in that position
+   (because the new key falls between two existing leaves), call
+   `splitOnKey(subtree, key)` — keys < `key` stay on the left, keys > `key`
+   move to the right, and the new leaf goes between them.
+2. **`node.depth > keyDepth`** — the new key is shallower than every key
+   currently in the tree under this branch. Split the whole subtree on
+   `key`, then build a new parent node at `keyDepth` containing the left
+   half, the new leaf, and the right half.
+3. **`node.depth < keyDepth`** — the new key sits deeper. Find the child
+   subtree the key would descend into, create one if it doesn't exist, and
+   recurse.
+
+The splitting step is the only subtle bit. When you insert a key
+between two existing leaves, the subtree pointer that *used to* mean "all
+keys in this open interval" now needs to be cleaved: keys less than the
+new one stay on the left, the rest go on the right. `splitOnKey` handles
+this recursively — when the pivot lands inside a sub-pointer's range, it
+descends and splits the deeper node too.
+
+> ⚠️ **Divergence from upstream.** The reference Bluesky implementation
+> separately encodes "insert above current depth" by repeatedly wrapping
+> the existing root in a single-pointer parent until depths line up. We
+> just call `splitOnKey` on the whole subtree once and build the new
+> parent. Both approaches produce the same tree (the spec is unambiguous);
+> ours is a few fewer lines.
+
+### `delete` walks down to the leaf, then merges
+
+The mirror of insert. We find the leaf at its target depth and remove it
+from the entry list. The interesting case is when the removed leaf sat
+*between* two subtree pointers. Before deletion the picture was
+`[…, ptrA, leaf, ptrB, …]`; after, it's `[…, ptrA, ptrB, …]` — two
+adjacent pointers, which isn't a valid node shape.
+
+We fix it by **merging**: load both subtrees, concatenate their entry
+lists (left's entries come first, since all its keys are < the deleted
+key, and all of right's keys are >), and replace the two pointers with one
+pointer to the merged tree.
+
+Empty subtrees get pruned on the way up: if a subtree becomes empty after
+delete, its pointer drops out of the parent's entry list entirely (the
+spec says "empty subtrees are encoded as null pointers, not empty nodes").
+
+After every mutation, `trimRoot()` checks whether the root has collapsed
+to a single child pointer with no leaves of its own. If so, the child
+becomes the new root — this is **depth demotion**, the opposite of the
+wrap-in-a-new-parent we do in `add` case 2.
+
+### `update` is `delete + add`'s simpler cousin
+
+`update` walks down the same descent path as `get`, finds the matching
+leaf at its target depth, and replaces just the value CID. Tree shape
+doesn't change, so no splits and no merges are needed. The path's nodes
+above all get re-encoded (because their child CIDs changed), but their
+*entry lists* don't change at all.
+
+### `getRoot` returns "blocks new since load"
+
+When we call `getRoot()` on a freshly-mutated MST, we want to know which
+blocks the caller needs to persist. The trick: every `Tree` knows whether
+its CID has been invalidated. We walk the tree, encoding only dirty nodes,
+and collect every block we emit. We also keep a `knownCids` set populated
+when the MST was loaded (containing the root CID we started from). Blocks
+in `knownCids` get filtered out of the returned list, so the caller only
+sees *truly new* blocks.
+
+If you call `getRoot()` on an unchanged loaded MST, you get the root CID
+and an empty `blocks` array. Useful: callers can use it as a "what
+changed?" probe without paying for serialization.
+
+### `diff` works at the key set level
+
+`MST.diff(prev, next)` returns four maps and arrays:
+
+- `adds`: keys present in `next` but not `prev`
+- `updates`: keys whose CID changed
+- `deletes`: keys gone from `prev`
+- `newBlocks`: every block reachable from `next` that isn't reachable from `prev`
+- `removedCids`: every CID reachable from `prev` that isn't reachable from `next`
+
+The implementation is intentionally simple: list both trees, take set
+differences. A smarter implementation walks the trees in parallel and
+prunes subtrees whose root CIDs match — but the set-diff is easy to
+audit and the trees are typically a few hundred blocks. We can swap in a
+walker later without changing the API.
+
+> 📖 **Why expose both the key diff and the block diff?**
+> The firehose payload needs the block diff (CAR file of new blocks +
+> root CID). Application code generally only cares about the key diff
+> (which records were added/changed/deleted). Returning both costs one
+> map walk and saves callers from re-deriving one from the other.
+
+### Determinism, restated
+
+The hardest property to keep is also the most important: **insertion order
+must not affect the resulting CID**. Two facts protect this:
+
+1. A key's depth is fixed by its hash — it can't drift between depths
+   based on what else is in the tree.
+2. Within a node, entries are stored in sorted key order — the encoder
+   always emits them in the same sequence.
+
+The self-test below builds the same key set five times in five different
+random orders and confirms all five roots are equal. If you change the
+algorithm and that test starts failing, you've broken protocol-level
+replication. There is no "good enough" here.
+
+---
 
 ## Try it
 
-Once the implementation lands:
+The implementation ships with a self-test:
 
 ```bash
-pnpm tsx scripts/mst-demo.ts
+pnpm tsx -e "await import('./src/pds/repo/mst').then(m => m.runMstSelfTest())"
 ```
 
-…will build an MST with a thousand keys, print its depth distribution, then
-add one key and show which blocks changed. You should see ~5 blocks
-touched, not 1,000.
+Or, equivalently in an `.mts` file:
+
+```ts
+import { runMstSelfTest } from './src/pds/repo/mst.ts'
+await runMstSelfTest()
+```
+
+What it proves:
+
+- **100 inserts + 100 lookups round-trip.** Every `add()` produces a tree
+  that `get()` can read.
+- **Delete works.** After removing 50 of the 100 keys, the survivors still
+  resolve and the deleted ones return `null`.
+- **Determinism.** Builds the full 100-key set five times in five
+  different shuffled orders. All five must produce the same root CID.
+- **Diff is correct.** Diffing empty against full gives exactly 100 adds,
+  zero updates, zero deletes.
+
+You should see output like:
+
+```
+MST self-test passed: {
+  keys: 100,
+  surviving: 50,
+  referenceRoot: 'bafyreif…',
+  diffAdds: 100,
+  diffNewBlocks: 5
+}
+```
+
+If the `referenceRoot` ever differs between runs of the same code, that's
+the bug to chase first.
+
+> 📖 **What about a "real" test suite?**
+> The project doesn't have one configured yet — `vitest` will land with
+> the chapter on testing infrastructure. The exported self-test is a
+> deliberate placeholder: it's fast, it has no dependencies, and it'll
+> survive the migration into proper unit tests.
 
 ## Exercises
 
@@ -245,8 +421,24 @@ touched, not 1,000.
 3. Given two MST roots, what's the minimum number of blocks you'd need to
    fetch to know whether the trees are *identical* without comparing
    their entries?
+4. The `splitOnKey` helper recurses when the pivot key falls inside a
+   subtree pointer's range. Sketch a tree where this recursion goes more
+   than one level deep, and check by hand that the resulting halves
+   reassemble correctly.
+5. `delete` merges two adjacent subtree pointers by concatenating their
+   entry lists. Convince yourself this is safe — i.e. the concatenated
+   list still satisfies the "keys sorted, depth uniform" invariant.
+   What would break if the two subtrees were at *different* depths?
+6. Write a benchmark that times `add` against a tree of increasing size
+   (1k, 10k, 100k keys). Plot the per-write cost. It should look
+   logarithmic; if it looks linear, find the bug.
+7. Implement `MST.diff` as a parallel tree-walk that prunes matching-CID
+   subtrees, and compare its block-fetch count to the current list-based
+   implementation for a 10k-key tree with 10 mutations.
 
 ## Up next
 
 We have a deterministic tree. Now we wrap it in a signed envelope and call
 it a commit: [Chapter 07 — Commits and signing](./07-commits-and-signing.md).
+
+← [05 — CIDs and DAG-CBOR](./05-cid-and-dagcbor.md) · → [07 — Commits and signing](./07-commits-and-signing.md)
