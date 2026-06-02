@@ -13,7 +13,8 @@
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "format": "prettier --write \"**/*.{ts,tsx,md,json,css}\"",
-    "lint": "eslint . --ext .ts,.tsx"
+    "lint": "eslint . --ext .ts,.tsx",
+    "admin:hash": "tsx scripts/admin-hash.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.14",

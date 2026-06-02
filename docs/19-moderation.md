@@ -1,0 +1,366 @@
+# Moderation
+
+Chapter 18 ended the main book with a working production PDS and a list of
+threads left dangling. This chapter picks up the one most operators reach
+for first: the buttons that an admin presses when something has gone wrong.
+
+A user's account is hosted on a PDS. Eventually somebody — the user, an
+abuse complaint, a court order, a fat-fingered handle migration — asks the
+operator to *do something* about that account. The protocol's answer is a
+small XRPC surface, `com.atproto.admin.*`, that the PDS speaks to nobody
+but its own operator. This chapter is that surface.
+
+What ships here:
+
+- `com.atproto.admin.getAccountInfo` — read one account.
+- `com.atproto.admin.getAccountInfos` — bulk read.
+- `com.atproto.admin.updateAccountStatus` — flip active / takendown /
+  deactivated / deleted.
+- `com.atproto.admin.updateAccountHandle` — force-rename.
+- `com.atproto.admin.updateAccountEmail` — out-of-band email change.
+- `com.atproto.admin.sendEmail` — operator-to-user message.
+- `com.atproto.admin.deleteAccount` — admin-driven destroy.
+- `requireAdmin` in `src/pds/auth/middleware.ts` — HTTP Basic check.
+- `scripts/admin-hash.ts` (`pnpm admin:hash`) — generate the password
+  digest you store in env.
+
+## What moderation IS, here
+
+The first thing to be honest about is what a PDS *can* moderate. A PDS
+owns user **state**: which accounts exist, whether they're active, what
+handle they answer to, what email is on file. It doesn't own the social
+graph. It doesn't run a hide-list. It doesn't decide that a particular
+post is harmful — that's the AppView's job, layered on top of the
+indexed firehose with its own label system.
+
+So when we talk about "moderation on the PDS," we mean exactly four
+levers:
+
+1. **Status changes**. Active ⇄ takendown, active ⇄ deactivated, → deleted.
+2. **Identity changes**. Force a new handle. Force a new email.
+3. **Direct contact**. Email the user out-of-band.
+4. **Visibility**. Read the account record for an audit.
+
+Everything else — what the network *does* with a takendown account, what
+gets indexed, what labels appear next to a post, who can see whose
+follows — is downstream. We tell the firehose; downstream consumers
+honor the signal or they don't. That's federation working as designed.
+
+## Admin auth: HTTP Basic with a scrypt-hashed password
+
+The admin surface deliberately does *not* use the regular JWT-issuance
+flow. Three reasons:
+
+- **Admin isn't an account.** There's no row in `accounts` for the
+  operator. They don't have a DID, a repo, a handle, an email.
+- **Admin sessions sitting in `refresh_tokens` is the wrong storage.**
+  Refresh rows are rotated on every use; long-lived admin tooling would
+  trip the rotation logic constantly.
+- **The hot path is small.** A handful of admin requests per week, made
+  from a shell session. We don't need stateless auth's throughput.
+
+So `requireAdmin` (in `src/pds/auth/middleware.ts`) takes a
+straightforward HTTP Basic header. The username is conventionally
+`admin` and we ignore it. The password is compared against a stored
+hash:
+
+```ts
+const ok = stored.startsWith('plain:')
+  ? timingSafeEqualStr(password, stored.slice('plain:'.length))
+  : await verifyPassword(password, stored)
+```
+
+Two env vars feed the hash:
+
+- `PDS_ADMIN_PASSWORD_HASH` — a `scrypt:v1:...` digest produced once by
+  `pnpm admin:hash`. **Recommended** for any deployment you can reach.
+- `PDS_ADMIN_PASSWORD` — a plaintext fallback. The middleware prefixes
+  it with `plain:` internally so the storage path is obviously dev-only.
+  Useful for the local-curl flow, not for production.
+
+Neither set means the admin surface is disabled. Every endpoint then
+returns `403 AdminDisabled`. That is the default on a fresh clone, on
+purpose: no operator credential = no operator surface.
+
+Generating the hash is a one-liner:
+
+```bash
+pnpm admin:hash 'correct-horse-battery-staple-with-extras'
+# → scrypt:v1:32768:8:1:abc...:def...
+```
+
+Paste the result into your secret manager / `.env` / orchestration system
+and never write the plaintext down again.
+
+## The state machine
+
+`accounts.status` is the single source of truth. Four states, with these
+transitions:
+
+```
+        ┌─────────┐         ┌──────────────┐
+        │ active  │ ◄────► │  takendown   │
+        └────┬────┘         └──────────────┘
+             │      ▲
+             ▼      │
+        ┌──────────────┐
+        │ deactivated  │
+        └──────┬───────┘
+               │
+               ▼
+        ┌──────────┐
+        │ deleted  │   ← terminal
+        └──────────┘
+```
+
+The reversible transitions (active ↔ takendown, active ↔ deactivated)
+correspond to "user can sign in" toggling on and off. The terminal one
+(→ deleted) emits a `#tombstone` event; downstream consumers drop their
+state for the DID. Nothing un-tombstones an account once tombstoned.
+
+`updateAccountStatus` enforces this. If the account is already
+`deleted`, it 403s with `InvalidAccountState`. If the target status
+matches the current one, it's a no-op rather than an error (idempotent —
+admins retry too).
+
+Every status change emits one firehose event:
+
+- `active` → `#account { active: true }`
+- otherwise → `#account { active: false, status: <new> }`
+- `deleted` additionally → `#tombstone`
+
+That's the same wire shape the user-side `deactivate`/`activate`/`delete`
+flows emit. From the federation side, an admin takedown is
+indistinguishable from a user-initiated deactivation; both are just
+"this DID went quiet."
+
+## getAccountInfo / getAccountInfos
+
+Read one or many. The minimum useful payload:
+
+```ts
+{
+  did: string
+  handle: string
+  email: string
+  emailConfirmedAt?: string
+  indexedAt: string  // = accounts.created_at
+  status: string
+}
+```
+
+The upstream lexicon adds `relatedRecords` (recent records the account
+posted) and a `repo` summary (root CID, rev, active). We leave those out
+for the teaching surface — both are derivable from existing endpoints
+(`com.atproto.sync.getLatestCommit`, `com.atproto.repo.listRecords`) and
+including them here would duplicate that work.
+
+`getAccountInfos` takes repeated `?dids=` query params. The XRPC
+dispatcher folds repeated keys into the last value when it builds the
+`params` object, so the handler reaches into `request.url`:
+
+```ts
+const dids = new URL(request.url).searchParams.getAll('dids')
+```
+
+That pattern only appears in this handler today; if a third endpoint
+needs it we'll factor it into the dispatcher.
+
+## updateAccountHandle
+
+Validates handle syntax via the shared `assertValidHandle` (chapter 04).
+Checks availability — the `accounts_handle_idx` unique index makes that
+free; we just translate the `23505` Postgres error code into a
+`HandleNotAvailable` 409. Then swaps the row and emits `#identity`:
+
+```ts
+await emitIdentity({ did, handle })
+```
+
+> ⚠️ **Divergence from upstream.** A real PDS *also* rotates the user's
+> PLC operation so the DID document reflects the new handle. We don't,
+> for two reasons. First, rotation logic is being implemented in a
+> separate session and isn't on `main` yet. Second, including it here
+> would mean an admin operation has to read the user's rotation key,
+> which has its own access-control story this chapter isn't ready to
+> open up. The follow-up that combines admin rename + PLC rotation will
+> land alongside the rotation work.
+
+Until then: the firehose `#identity` event tells consumers the new handle
+exists; the DID document still claims the old one until the rotation
+catches up. That's wrong, and the chapter calling it out is the fix
+until the code does.
+
+## updateAccountEmail
+
+Resolves `account` (DID *or* handle, via `findAccountByIdentifier` from
+the session module — same lookup the login flow uses), then:
+
+```ts
+await db
+  .update(accounts)
+  .set({ email: parsed.data.email, emailConfirmedAt: null })
+  .where(eq(accounts.did, target.did))
+```
+
+Clearing `emailConfirmedAt` is intentional. An admin can set the
+address, but they can't *vouch* for it; the user still has to confirm
+through `com.atproto.server.confirmEmail` before any flow that requires
+confirmation (password reset, account delete) will use it. This matches
+how the user-side `updateEmail` works (chapter 13).
+
+A unique-violation surfaces as `EmailNotAvailable` 409. Same translation
+as the handle path.
+
+## sendEmail
+
+Lookup the target's email by DID, hand it to `sendEmail` from
+`auth/email_sender.ts` (the same shim chapter 13 uses for reset codes —
+production swaps it for a transactional provider, chapter 18 walked
+that). The handler returns `{ sent: true }` so the operator gets a
+positive confirmation even when the underlying transport is fire-and-
+forget.
+
+Subject defaults to `"Message from your PDS operator"`. `comment` is
+accepted for shape compatibility with the upstream lexicon (where it's
+an audit-trail field); we don't yet have an audit log to put it in, so
+it's a no-op.
+
+## deleteAccount
+
+The admin-driven counterpart to the user-side delete (chapter 13). The
+user flow demands password + email-token + JWT; the admin flow trusts
+the operator and skips both. Same outcome: status flips to `deleted`,
+the row stays, the firehose gets `#account { status: 'deleted' }` plus
+`#tombstone`.
+
+Why the soft delete? Same reasoning as the user-side path in chapter 13:
+
+- The DID stays bound to this PDS forever. If we deleted the row, the
+  DID could (in principle) be re-bound by a future operator running a
+  different PDS at the same `did:web` host, and the AT-URIs that ever
+  pointed at it would silently start meaning something different.
+- The PLC log is append-only. We can't retract operations.
+- An admin who hard-deletes by mistake has no path back. Soft-delete
+  keeps reversibility cheap: in production you can build a "restore"
+  flow on top of the existing row by flipping status back, if you trust
+  the operator with that lever.
+
+## What changes for the user
+
+Two of these endpoints touch a user's identity. Worth being explicit:
+
+- **Handle change.** The user's existing sessions still work (no token
+  invalidation); the access JWT identifies the DID, not the handle.
+  The next `getSession` call returns the new handle. Their clients
+  notice on next session check and update the UI. Any client that
+  cached the old handle on disk is out of date until it re-resolves —
+  which is fine because handle-to-DID lookup happens at login time, not
+  per-request.
+- **Email change.** Same: their existing sessions stay valid. The next
+  password-reset request is sent to the *new* address. If the operator
+  changes the email to one the user doesn't control, the operator has
+  effectively locked the user out of password recovery. This is a
+  feature (court-ordered handover) and a footgun (don't typo the
+  address); the chapter flags it because the API surface is otherwise
+  reversible-feeling.
+
+Neither operation invalidates refresh tokens. If a takedown is what you
+want, use `updateAccountStatus` — *that* one's caught by every
+authenticated handler's `requireAccessAuth` and forbids the account from
+making more requests.
+
+## Try it
+
+Set up the admin surface:
+
+```bash
+# Generate the hash once
+pnpm admin:hash 'a-good-password-please' > .admin-hash
+export PDS_ADMIN_PASSWORD_HASH="$(cat .admin-hash)"
+pnpm dev
+```
+
+In another terminal:
+
+```bash
+ADMIN="admin:a-good-password-please"
+PDS="http://localhost:3000"
+
+# List one account
+curl -u "$ADMIN" \
+  "$PDS/xrpc/com.atproto.admin.getAccountInfo?did=did:plc:abc123" | jq
+
+# Bulk
+curl -u "$ADMIN" \
+  "$PDS/xrpc/com.atproto.admin.getAccountInfos?dids=did:plc:abc&dids=did:plc:def" | jq
+
+# Takedown
+curl -u "$ADMIN" -X POST \
+  -H 'content-type: application/json' \
+  -d '{"did":"did:plc:abc123","status":"takendown"}' \
+  "$PDS/xrpc/com.atproto.admin.updateAccountStatus"
+
+# Reverse it
+curl -u "$ADMIN" -X POST \
+  -H 'content-type: application/json' \
+  -d '{"did":"did:plc:abc123","status":"active"}' \
+  "$PDS/xrpc/com.atproto.admin.updateAccountStatus"
+
+# Send a message
+curl -u "$ADMIN" -X POST \
+  -H 'content-type: application/json' \
+  -d '{"recipientDid":"did:plc:abc123","subject":"hello","content":"Just checking in."}' \
+  "$PDS/xrpc/com.atproto.admin.sendEmail"
+```
+
+Each request prints the dev email shim's structured log in the PDS
+process; the `sendEmail` call will show the operator's message there.
+
+## Production hardening
+
+The admin surface is a power tool. A few things you should bolt on
+before exposing it to a public network:
+
+- **IP allowlist.** Front the PDS with a proxy (Caddy, nginx, AWS ALB)
+  and restrict `/xrpc/com.atproto.admin.*` to your office / VPN / bastion
+  IPs. There's no reason an admin endpoint should answer to the public
+  internet.
+- **Audit log.** The PDS doesn't write one yet. Every admin endpoint is a
+  candidate: log the operator (well, the source IP — we don't have
+  per-operator identity), the NSID, the target DID, the timestamp, the
+  outcome. A separate `admin_audit` table would do; a future chapter will
+  add it.
+- **Separate infrastructure from user traffic.** Even with an IP
+  allowlist, running admin on the same port as user XRPC means a bug in
+  one accidentally exposes the other. A separate `:3001` listener bound
+  to localhost, fronted only by the admin proxy, is a small change and a
+  big posture improvement.
+- **Per-action confirmation.** Status changes to `deleted` are
+  irreversible; for those, build a confirmation flow into your tooling
+  (a `--yes-i-really-mean-it` flag, a two-step CLI wrapper) rather than
+  trusting that whoever has the password can be trusted with every
+  combination of arguments.
+
+## Exercises
+
+1. Add `deactivated` as a valid input to `updateAccountStatus` even when
+   the account is `takendown`. Right now the handler updates the row and
+   emits the event without protest, but the firehose order is
+   `takendown` → `deactivated` → `active`. Is that meaningful? Why or
+   why not — and what does an AppView do with the sequence?
+
+2. The chapter says `sendEmail` accepts a `comment` field and does
+   nothing with it. Sketch a minimal `admin_audit` table that captures
+   `(timestamp, nsid, target_did, comment)` and wire `sendEmail`,
+   `updateAccountStatus`, and `deleteAccount` to write to it. Where does
+   the operator-identity column come from?
+
+3. The PLC-rotation divergence for `updateAccountHandle` is open. What
+   subset of the rotation logic do you need to wire in to make the DID
+   document reflect the new handle? Where does the rotation key come
+   from for an admin-initiated change — the user's `rotation_key_priv`
+   column, or somewhere else?
+
+← [18 — Production](./18-production.md) ·
+[Table of contents](./README.md)

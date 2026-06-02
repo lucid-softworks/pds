@@ -11,8 +11,10 @@
 import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db'
 import { accounts, refreshTokens } from '~/lib/db/schema'
+import { getConfig } from '~/lib/config'
 import { Forbidden, Unauthorized } from '~/pds/xrpc/errors'
 import { verifyAccessToken, verifyRefreshToken } from './jwt'
+import { verifyPassword } from './password'
 import { assertAccountActive } from './session'
 
 export type AuthenticatedAccount = {
@@ -40,6 +42,54 @@ export async function requireAccessAuth(
   const token = parseBearer(authorization)
   const claims = await verifyAccess(token)
   return loadAccount(claims.sub, opts)
+}
+
+/** Validate the Authorization header as HTTP Basic with the configured admin
+ *  password. The username field is conventionally `admin` and is ignored.
+ *  Throws when the admin surface is disabled (no hash configured), the
+ *  header is missing / malformed, or the password is wrong.
+ *
+ *  See chapter 19 — Moderation. */
+export async function requireAdmin(
+  authorization: string | undefined,
+): Promise<void> {
+  const cfg = getConfig()
+  if (!cfg.adminPasswordHash) {
+    throw Forbidden('admin surface is disabled', 'AdminDisabled')
+  }
+  if (!authorization || !/^basic\s+/i.test(authorization.trim())) {
+    throw Unauthorized('Basic auth required', 'AuthMissing')
+  }
+  const b64 = authorization.trim().replace(/^basic\s+/i, '').trim()
+  let decoded: string
+  try {
+    decoded = Buffer.from(b64, 'base64').toString('utf8')
+  } catch {
+    throw Unauthorized('malformed Basic auth', 'InvalidToken')
+  }
+  const idx = decoded.indexOf(':')
+  if (idx < 0) {
+    throw Unauthorized('malformed Basic auth', 'InvalidToken')
+  }
+  const password = decoded.slice(idx + 1)
+  const stored = cfg.adminPasswordHash
+  // Plaintext-fallback prefix means PDS_ADMIN_PASSWORD was set instead of the
+  // pre-hashed form. Compare directly; documented as dev-only.
+  const ok = stored.startsWith('plain:')
+    ? timingSafeEqualStr(password, stored.slice('plain:'.length))
+    : await verifyPassword(password, stored)
+  if (!ok) {
+    throw Unauthorized('admin password incorrect', 'InvalidToken')
+  }
+}
+
+function timingSafeEqualStr(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  return diff === 0
 }
 
 /** Same but for refresh tokens (used by refreshSession / deleteSession). */

@@ -310,11 +310,14 @@ this implementation deliberately left untouched:
   authenticate with credentials separate from the main password, with
   scope restrictions. The schema column exists; the flow doesn't yet.
 - **Moderation.** Takedowns, label propagation, the moderation log.
-  Adjacent to the PDS rather than inside it, mostly handled by the
-  AppView, but the PDS exposes the takedown status on `getRepoStatus`.
+  Label-and-hide rules are an AppView concern, but the operator-facing
+  surface for managing accounts on *your* PDS — takedowns, force-renames,
+  out-of-band emails, deletions — lives in
+  [chapter 19](./19-moderation.md).
 
 The codebase is small enough that any of these is a tractable addition.
 Skim, pick one, and add it.
 
 ← [17 — PDS vs AppView vs Relay](./17-pds-appview-relay.md) ·
+[19 — Moderation](./19-moderation.md) ·
 [Table of contents](./README.md)

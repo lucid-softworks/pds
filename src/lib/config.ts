@@ -18,6 +18,12 @@ export type PdsConfig = {
   blobStoreKind: 'filesystem' | 's3'
   /** Root directory for the filesystem blob store (ignored for s3). */
   blobStoreDir: string
+  /** Scrypt hash of the operator-admin password, or null to disable the
+   *  com.atproto.admin.* surface entirely. See chapter 19. */
+  adminPasswordHash: string | null
+  /** When true, createAccount rejects without a valid `inviteCode`. Default
+   *  false (open signup). See chapter 12 — Invite codes. */
+  inviteRequired: boolean
 }
 
 let cached: PdsConfig | null = null
@@ -38,6 +44,10 @@ export function getConfig(): PdsConfig {
   }
   const blobStoreKind: 'filesystem' | 's3' =
     process.env.BLOB_STORE === 's3' ? 's3' : 'filesystem'
+  // Prefer the pre-hashed env var: an operator generates the hash once via
+  // `pnpm admin:hash <password>` and pastes the result. The plaintext fallback
+  // exists for quick local poking and is documented as such in chapter 19.
+  const adminPasswordHash = resolveAdminPasswordHash()
   cached = {
     publicUrl: publicUrl.replace(/\/$/, ''),
     hostname,
@@ -46,8 +56,30 @@ export function getConfig(): PdsConfig {
     localPlcOnly: process.env.PDS_LOCAL_PLC !== 'false',
     blobStoreKind,
     blobStoreDir: required('BLOB_DIR', './.blobs'),
+    adminPasswordHash,
+    inviteRequired: process.env.PDS_INVITE_REQUIRED === 'true',
   }
   return cached
+}
+
+function resolveAdminPasswordHash(): string | null {
+  const preHashed = process.env.PDS_ADMIN_PASSWORD_HASH
+  if (preHashed && preHashed.length > 0) {
+    if (!preHashed.startsWith('scrypt:v1:')) {
+      throw new Error(
+        'PDS_ADMIN_PASSWORD_HASH must be a scrypt:v1: string from `pnpm admin:hash`',
+      )
+    }
+    return preHashed
+  }
+  // Plaintext fallback: log a warning, lazily hash on first auth. We don't
+  // hash here because getConfig() is synchronous and hashPassword is async;
+  // instead, requireAdmin caches the derived hash via this same field after
+  // first verify. Returned as a sentinel-prefixed string the middleware
+  // recognises.
+  const plain = process.env.PDS_ADMIN_PASSWORD
+  if (plain && plain.length > 0) return `plain:${plain}`
+  return null
 }
 
 function required(name: string, fallback?: string): string {

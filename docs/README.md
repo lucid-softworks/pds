@@ -39,6 +39,10 @@ and *why* the design is what it is.
 - [17 — PDS vs AppView vs Relay](./17-pds-appview-relay.md)
 - [18 — Running in production](./18-production.md)
 
+## Part VI — Operating the PDS
+
+- [19 — Moderation](./19-moderation.md)
+
 ---
 
 ## Reading order
@@ -54,7 +58,7 @@ Chapters build on each other. If you skip around, the dependency graph is:
                                        ↓
                                        12 → 13 → 14 → 15
                                                         ↓
-                                                        16 → 17 → 18
+                                                        16 → 17 → 18 → 19
 ```
 
 The hardest cluster is 06–08 (MST, commits, CAR). If you're stuck there, keep
