@@ -12,6 +12,17 @@ import * as refreshSession from './com.atproto.server.refreshSession'
 import * as deleteSession from './com.atproto.server.deleteSession'
 import * as getSession from './com.atproto.server.getSession'
 import * as describeServer from './com.atproto.server.describeServer'
+// app passwords
+import * as createAppPassword from './com.atproto.server.createAppPassword'
+import * as listAppPasswords from './com.atproto.server.listAppPasswords'
+import * as revokeAppPassword from './com.atproto.server.revokeAppPassword'
+// email + password reset
+import * as requestEmailConfirmation from './com.atproto.server.requestEmailConfirmation'
+import * as confirmEmail from './com.atproto.server.confirmEmail'
+import * as requestEmailUpdate from './com.atproto.server.requestEmailUpdate'
+import * as updateEmail from './com.atproto.server.updateEmail'
+import * as requestPasswordReset from './com.atproto.server.requestPasswordReset'
+import * as resetPassword from './com.atproto.server.resetPassword'
 // identity
 import * as resolveHandle from './com.atproto.identity.resolveHandle'
 // repo
@@ -31,6 +42,7 @@ import * as syncGetRecord from './com.atproto.sync.getRecord'
 import * as getRepo from './com.atproto.sync.getRepo'
 import * as getRepoStatus from './com.atproto.sync.getRepoStatus'
 import * as listRepos from './com.atproto.sync.listRepos'
+import * as subscribeRepos from './com.atproto.sync.subscribeRepos'
 
 export const registry = new HandlerRegistry()
   .register(createAccount.nsid, createAccount.def)
@@ -39,6 +51,15 @@ export const registry = new HandlerRegistry()
   .register(deleteSession.nsid, deleteSession.def)
   .register(getSession.nsid, getSession.def)
   .register(describeServer.nsid, describeServer.def)
+  .register(createAppPassword.nsid, createAppPassword.def)
+  .register(listAppPasswords.nsid, listAppPasswords.def)
+  .register(revokeAppPassword.nsid, revokeAppPassword.def)
+  .register(requestEmailConfirmation.nsid, requestEmailConfirmation.def)
+  .register(confirmEmail.nsid, confirmEmail.def)
+  .register(requestEmailUpdate.nsid, requestEmailUpdate.def)
+  .register(updateEmail.nsid, updateEmail.def)
+  .register(requestPasswordReset.nsid, requestPasswordReset.def)
+  .register(resetPassword.nsid, resetPassword.def)
   .register(resolveHandle.nsid, resolveHandle.def)
   .register(createRecord.nsid, createRecord.def)
   .register(putRecord.nsid, putRecord.def)
@@ -55,3 +76,4 @@ export const registry = new HandlerRegistry()
   .register(getRepo.nsid, getRepo.def)
   .register(getRepoStatus.nsid, getRepoStatus.def)
   .register(listRepos.nsid, listRepos.def)
+  .register(subscribeRepos.nsid, subscribeRepos.def)
