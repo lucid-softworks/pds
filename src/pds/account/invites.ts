@@ -19,14 +19,12 @@ import { base32 } from 'multiformats/bases/base32'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core'
 import { db } from '~/lib/db'
-// Direct import: the schema barrel is owned by the coordinator and won't
-// re-export new tables until merge. Drizzle is happy with the deeper path.
 import {
   inviteCodes,
   inviteCodeUses,
   type InviteCode,
   type InviteCodeUse,
-} from '~/lib/db/schema/invite_codes'
+} from '~/lib/db/schema'
 import { Unauthorized } from '~/pds/xrpc/errors'
 
 // Same widening as `auth/app_password.ts`: the db union collapses

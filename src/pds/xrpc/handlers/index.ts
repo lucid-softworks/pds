@@ -29,8 +29,16 @@ import * as deactivateAccount from './com.atproto.server.deactivateAccount'
 import * as activateAccount from './com.atproto.server.activateAccount'
 import * as requestAccountDelete from './com.atproto.server.requestAccountDelete'
 import * as deleteAccount from './com.atproto.server.deleteAccount'
+// invite codes
+import * as createInviteCode from './com.atproto.server.createInviteCode'
+import * as createInviteCodes from './com.atproto.server.createInviteCodes'
+import * as getAccountInviteCodes from './com.atproto.server.getAccountInviteCodes'
+import * as checkSignupQueue from './com.atproto.server.checkSignupQueue'
 // identity
 import * as resolveHandle from './com.atproto.identity.resolveHandle'
+import * as updateHandle from './com.atproto.identity.updateHandle'
+import * as requestPlcOperationSignature from './com.atproto.identity.requestPlcOperationSignature'
+import * as signPlcOperation from './com.atproto.identity.signPlcOperation'
 // repo
 import * as createRecord from './com.atproto.repo.createRecord'
 import * as putRecord from './com.atproto.repo.putRecord'
@@ -49,6 +57,14 @@ import * as getRepo from './com.atproto.sync.getRepo'
 import * as getRepoStatus from './com.atproto.sync.getRepoStatus'
 import * as listRepos from './com.atproto.sync.listRepos'
 import * as subscribeRepos from './com.atproto.sync.subscribeRepos'
+// admin
+import * as adminGetAccountInfo from './com.atproto.admin.getAccountInfo'
+import * as adminGetAccountInfos from './com.atproto.admin.getAccountInfos'
+import * as adminUpdateAccountStatus from './com.atproto.admin.updateAccountStatus'
+import * as adminUpdateAccountHandle from './com.atproto.admin.updateAccountHandle'
+import * as adminUpdateAccountEmail from './com.atproto.admin.updateAccountEmail'
+import * as adminSendEmail from './com.atproto.admin.sendEmail'
+import * as adminDeleteAccount from './com.atproto.admin.deleteAccount'
 
 export const registry = new HandlerRegistry()
   .register(createAccount.nsid, createAccount.def)
@@ -71,7 +87,14 @@ export const registry = new HandlerRegistry()
   .register(activateAccount.nsid, activateAccount.def)
   .register(requestAccountDelete.nsid, requestAccountDelete.def)
   .register(deleteAccount.nsid, deleteAccount.def)
+  .register(createInviteCode.nsid, createInviteCode.def)
+  .register(createInviteCodes.nsid, createInviteCodes.def)
+  .register(getAccountInviteCodes.nsid, getAccountInviteCodes.def)
+  .register(checkSignupQueue.nsid, checkSignupQueue.def)
   .register(resolveHandle.nsid, resolveHandle.def)
+  .register(updateHandle.nsid, updateHandle.def)
+  .register(requestPlcOperationSignature.nsid, requestPlcOperationSignature.def)
+  .register(signPlcOperation.nsid, signPlcOperation.def)
   .register(createRecord.nsid, createRecord.def)
   .register(putRecord.nsid, putRecord.def)
   .register(deleteRecord.nsid, deleteRecord.def)
@@ -88,3 +111,10 @@ export const registry = new HandlerRegistry()
   .register(getRepoStatus.nsid, getRepoStatus.def)
   .register(listRepos.nsid, listRepos.def)
   .register(subscribeRepos.nsid, subscribeRepos.def)
+  .register(adminGetAccountInfo.nsid, adminGetAccountInfo.def)
+  .register(adminGetAccountInfos.nsid, adminGetAccountInfos.def)
+  .register(adminUpdateAccountStatus.nsid, adminUpdateAccountStatus.def)
+  .register(adminUpdateAccountHandle.nsid, adminUpdateAccountHandle.def)
+  .register(adminUpdateAccountEmail.nsid, adminUpdateAccountEmail.def)
+  .register(adminSendEmail.nsid, adminSendEmail.def)
+  .register(adminDeleteAccount.nsid, adminDeleteAccount.def)
