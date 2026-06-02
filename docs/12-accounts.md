@@ -268,6 +268,42 @@ makes refresh tokens better than access tokens.
 The two JWTs are returned alongside the user's DID and the freshly-built
 DID document. The client now has everything it needs.
 
+## Handle rotation later
+
+Once an account exists, the user can rename it via
+`com.atproto.identity.updateHandle`. The handler reuses the same machinery
+the genesis op did, just chained one step further down the log:
+
+1. **Authenticate.** `requireAccessAuth` resolves the bearer JWT to the
+   account row.
+2. **Validate.** The new handle goes through `assertValidHandle`; reserved
+   TLDs warn but pass (mirroring create). If the requested handle equals the
+   current one we return 200 immediately — no-op rotations don't pollute
+   the log.
+3. **Check availability.** `resolveLocalHandle(newHandle)` — if it resolves
+   to a different DID, return `HandleNotAvailable` (HTTP 409).
+4. **Rotate the PLC log.** `rotatePlc({ did, newHandle, rotationKeyPriv })`
+   loads the latest op, copies its keys + service endpoint, swaps
+   `alsoKnownAs` to the new handle, sets `prev` to the previous op's CID,
+   signs with the rotation key, and appends to `plc_operations` with the
+   next `seq`.
+5. **Update the column.** `UPDATE accounts SET handle = ?` inside the same
+   `db.transaction` as step 4 so a failure on either side rolls both back.
+6. **Announce.** `emitIdentity({ did, handle })` writes an `#identity`
+   event to the firehose so any subscriber re-resolves the document.
+
+The DID never changes — it was hashed off the *genesis* op, and rotations
+append rather than replace. Neither does the signing key, so existing repo
+commits keep verifying against the same public key. The cost of a rename is
+one row in `plc_operations`, one column update on `accounts`, and one
+firehose event.
+
+The other two identity endpoints in the lexicon —
+`requestPlcOperationSignature` and `signPlcOperation` — are the escape
+hatch for caller-driven rotations (key changes, recovery key adds, PDS
+migration). They ship as `MethodNotImplemented` stubs and land in a future
+chapter alongside account migration.
+
 ## Failure handling
 
 The function is *almost* idempotent but not quite — we don't wrap steps 6

@@ -13,9 +13,10 @@
 // See chapter 12 — Account creation, and the diff-from-upstream callout in
 // chapter 04.
 
+import { desc, eq } from 'drizzle-orm'
 import { sha256 } from '@noble/hashes/sha256'
 import { base32 } from 'multiformats/bases/base32'
-import { encode } from '~/pds/codec'
+import { decode, encode } from '~/pds/codec'
 import { signBytes } from '~/pds/repo/keys'
 import { db } from '~/lib/db'
 import { plcOperations } from '~/lib/db/schema'
@@ -96,4 +97,153 @@ function base64url(bytes: Uint8Array): string {
   let s = ''
   for (const b of bytes) s += String.fromCharCode(b)
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+export type RotateInput = {
+  did: string
+  /** New handle. If omitted, the previous op's handle is carried forward —
+   *  useful once we extend rotations beyond handle changes. */
+  newHandle?: string
+  rotationKeyPriv: string
+}
+
+export type RotateResult = {
+  cid: string
+  seq: number
+  signedOpBytes: Uint8Array
+}
+
+/** Append a "rotate" PLC operation to the local log. Chains `prev` to the
+ *  current latest op's CID; keeps every other field identical unless an
+ *  argument overrides it. Returns the new op's CID + seq for the caller —
+ *  today only the handle can change, but the shape generalises to key /
+ *  service rotation when those land. */
+export async function rotatePlc(input: RotateInput): Promise<RotateResult> {
+  // 1. Load the latest op for this DID.
+  const latest = await loadLatestPlcOp(input.did)
+
+  // 2. Build the unsigned op, carrying forward every field that isn't being
+  //    overridden. `prev` is the only structural change vs the genesis.
+  const newHandle =
+    input.newHandle ?? handleFromAlsoKnownAs(latest.op.alsoKnownAs)
+  const unsigned: UnsignedPlcOp = {
+    type: 'plc_operation',
+    rotationKeys: latest.op.rotationKeys,
+    verificationMethods: latest.op.verificationMethods,
+    alsoKnownAs: [`at://${newHandle}`],
+    services: latest.op.services,
+    prev: latest.cid,
+  }
+
+  // 3. Sign the unsigned encoding with the rotation key — same algorithm as
+  //    the genesis op.
+  const unsignedBlock = await encode(unsigned)
+  const sigBytes = signBytes(input.rotationKeyPriv, unsignedBlock.bytes)
+  const signed: SignedPlcOp = { ...unsigned, sig: base64url(sigBytes) }
+
+  // 4. Encode the signed op; its CID is what the next rotation will chain to.
+  const signedBlock = await encode(signed)
+  const nextSeq = latest.seq + 1
+
+  await db.insert(plcOperations).values({
+    did: input.did,
+    cid: signedBlock.cid.toString(),
+    operation: signedBlock.bytes,
+    seq: nextSeq,
+  })
+
+  return {
+    cid: signedBlock.cid.toString(),
+    seq: nextSeq,
+    signedOpBytes: signedBlock.bytes,
+  }
+}
+
+async function loadLatestPlcOp(did: string): Promise<{
+  cid: string
+  seq: number
+  op: SignedPlcOp
+}> {
+  const rows = await db
+    .select({
+      cid: plcOperations.cid,
+      seq: plcOperations.seq,
+      operation: plcOperations.operation,
+    })
+    .from(plcOperations)
+    .where(eq(plcOperations.did, did))
+    .orderBy(desc(plcOperations.seq))
+    .limit(1)
+  const row = rows[0]
+  if (!row) {
+    throw new Error(`no PLC operations for ${did}`)
+  }
+  const op = await decode<SignedPlcOp>(row.operation)
+  return { cid: row.cid, seq: row.seq, op }
+}
+
+function handleFromAlsoKnownAs(aka: string[]): string {
+  const first = aka[0]
+  if (!first || !first.startsWith('at://')) {
+    throw new Error(`alsoKnownAs[0] is not an at:// URI: ${first}`)
+  }
+  return first.slice('at://'.length)
+}
+
+/** End-to-end check that rotation produces a properly chained op. Useful
+ *  during development; not part of the request path. Returns the two CIDs
+ *  for inspection. */
+export async function runPlcRotationSelfTest(): Promise<{
+  genesisCid: string
+  rotatedCid: string
+  rotatedPrev: string | null
+}> {
+  const { generateKeypair } = await import('~/pds/repo/keys')
+  const signing = generateKeypair()
+  const rotation = generateKeypair()
+  const handle = `selftest-${Date.now()}.test`
+
+  const genesis = await createLocalPlc({
+    handle,
+    rotationKeyPriv: rotation.privateKeyHex,
+    rotationKeyDidKey: rotation.didKey,
+    signingKeyDidKey: signing.didKey,
+    pdsEndpoint: 'http://localhost:3000',
+  })
+
+  // Insert a stub account row so the FK on plc_operations passes.
+  const { accounts } = await import('~/lib/db/schema')
+  await db.insert(accounts).values({
+    did: genesis.did,
+    handle,
+    email: `${handle}@example.invalid`,
+    passwordHash: 'selftest',
+    signingKeyPriv: signing.privateKeyHex,
+    signingKeyPub: signing.publicKeyMultibase,
+    rotationKeyPriv: rotation.privateKeyHex,
+    rotationKeyPub: rotation.publicKeyMultibase,
+  })
+
+  const rotated = await rotatePlc({
+    did: genesis.did,
+    newHandle: `renamed-${Date.now()}.test`,
+    rotationKeyPriv: rotation.privateKeyHex,
+  })
+
+  const decoded = await decode<SignedPlcOp>(rotated.signedOpBytes)
+  if (decoded.prev === null) {
+    throw new Error('rotated op has null prev — chain broken')
+  }
+  // The exact check that matters: `prev` equals the genesis op's CID.
+  const genesisBlock = await encode(genesis.signedOp)
+  if (decoded.prev !== genesisBlock.cid.toString()) {
+    throw new Error(
+      `rotated.prev (${decoded.prev}) does not match genesis CID (${genesisBlock.cid})`,
+    )
+  }
+  return {
+    genesisCid: genesisBlock.cid.toString(),
+    rotatedCid: rotated.cid,
+    rotatedPrev: decoded.prev,
+  }
 }

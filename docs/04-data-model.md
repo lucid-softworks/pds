@@ -231,6 +231,64 @@ Notice the same shape as the document above. The PDS endpoint is in
 `service[type=AtprotoPersonalDataServer]`. The signing key is in
 `verificationMethod`.
 
+## Rotation
+
+The DID is permanent; the DID *document* changes constantly. Every change is
+a new signed PLC operation appended to the DID's log, with `prev` pointing
+at the previous op's CID. The log is the cryptographic record of every
+identity change the account has ever made.
+
+```
+genesis op (seq 0, prev=null)
+   ↓ rotates to
+rotate op  (seq 1, prev=<genesis CID>)
+   ↓ rotates to
+rotate op  (seq 2, prev=<seq 1 CID>)
+```
+
+Two keys define the trust roles:
+
+- **Rotation key** authorises operations. Every op is signed with it; the
+  directory (or our local equivalent) verifies the signature comes from a
+  current rotation key listed in the log.
+- **Signing key** signs repo commits — a completely separate concern. The
+  signing key can be replaced via a rotation op; the rotation key can
+  replace itself the same way.
+
+The simplest rotation is `com.atproto.identity.updateHandle`: same rotation
+key, same signing key, same PDS endpoint — only `alsoKnownAs` changes. The
+new op carries forward every other field from the previous op, signs with
+the existing rotation key, and chains to the previous CID. After it's
+appended, the PDS atomically updates `accounts.handle` and emits an
+`#identity` firehose event so subscribers re-resolve the document.
+
+Future rotation kinds use the exact same machinery:
+
+- **Signing key rotation** — `verificationMethods.atproto` becomes a new
+  did:key. The repo's existing commit history keeps verifying against the
+  old key (it's preserved in the log); new commits are signed with the new
+  key.
+- **Service endpoint change** — `services.atproto_pds.endpoint` changes.
+  This is account migration: the user's repo moves to a new PDS, the DID
+  document is updated, and federation re-routes to the new endpoint
+  transparently.
+- **Recovery key add** — `rotationKeys` grows to include a user-held key
+  alongside the PDS-held one, so the user can recover the account even if
+  the PDS is unreachable.
+
+The DID itself never changes. It was derived from the SHA-256 hash of the
+*genesis* op's bytes, and rotations append rather than replace — they can't
+retroactively change history because every op points back at its predecessor
+by CID.
+
+> ⚠️ **Difference from upstream.** In local-PLC mode we don't publish
+> rotations to plc.directory. The chain is local-only — fine for development
+> and self-contained demos, broken for federation. Flipping
+> `PDS_LOCAL_PLC=false` would POST each signed op to
+> `https://plc.directory/<did>`; the directory verifies the signature
+> against the previous op's rotation keys and appends to its authoritative
+> log. See chapter 18 — Production.
+
 ## Exercises
 
 1. Look up `bsky.app`'s handle via DNS. What's its DID? What PDS hosts it?
