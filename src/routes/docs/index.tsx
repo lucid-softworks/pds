@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { listChapters } from '~/lib/docs'
+import { listChapters, type ChapterSummary } from '~/lib/docs'
 import { DocsSidebar } from '~/components/DocsSidebar'
 
 const getChapters = createServerFn({ method: 'GET' }).handler(async () => {
@@ -33,7 +33,7 @@ function DocsIndex() {
           ; jump between the two as you go.
         </p>
         <ol className="mt-10 space-y-2">
-          {chapters.map((c) => (
+          {chapters.map((c: ChapterSummary) => (
             <li key={c.slug}>
               <Link
                 to="/docs/$slug"

@@ -41,7 +41,7 @@ export function getDb(): Db {
 // (db.select().from(...)) see the right `this` regardless of the proxy.
 export const db = new Proxy({} as Db, {
   get(_t, prop) {
-    const real = getDb() as Record<PropertyKey, unknown>
+    const real = getDb() as unknown as Record<PropertyKey, unknown>
     const value = real[prop]
     return typeof value === 'function' ? (value as Function).bind(real) : value
   },

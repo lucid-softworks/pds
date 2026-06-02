@@ -4,7 +4,7 @@ import { listChapters, loadChapter } from '~/lib/docs'
 import { DocsSidebar } from '~/components/DocsSidebar'
 
 const getChapterPage = createServerFn({ method: 'GET' })
-  .validator((slug: unknown) => {
+  .inputValidator((slug: unknown): string => {
     if (typeof slug !== 'string') throw new Error('slug required')
     return slug
   })
