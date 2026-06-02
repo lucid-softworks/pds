@@ -7,14 +7,8 @@ import {
   primaryKey,
   index,
   uniqueIndex,
-  customType,
 } from 'drizzle-orm/pg-core'
-
-// Raw bytes column. Postgres' BYTEA accepts/returns Buffer in postgres-js and
-// Uint8Array in pglite — we narrow at the application boundary, not here.
-const bytea = customType<{ data: Uint8Array; default: false }>({
-  dataType: () => 'bytea',
-})
+import { bytea } from './_columns'
 
 // ─── accounts ──────────────────────────────────────────────────────────────
 //
