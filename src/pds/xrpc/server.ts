@@ -83,6 +83,10 @@ export async function dispatch(
       authorization: request.headers.get('authorization') ?? undefined,
       request,
     })
+    // Binary handlers (e.g. sync.getRepo, sync.getBlob) build their own
+    // Response so they can stream CAR / blob bytes; pass it through unchanged
+    // rather than JSON-stringifying it.
+    if (output instanceof Response) return output
     return new Response(
       output === undefined ? '' : JSON.stringify(output),
       {

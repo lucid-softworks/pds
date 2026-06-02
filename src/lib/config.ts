@@ -14,6 +14,10 @@ export type PdsConfig = {
   /** When true (default in dev), we don't publish PLC ops to plc.directory.
    *  See chapter 12. */
   localPlcOnly: boolean
+  /** Blob storage backend: 'filesystem' (default) or 's3' (stub). Ch. 15. */
+  blobStoreKind: 'filesystem' | 's3'
+  /** Root directory for the filesystem blob store (ignored for s3). */
+  blobStoreDir: string
 }
 
 let cached: PdsConfig | null = null
@@ -32,12 +36,16 @@ export function getConfig(): PdsConfig {
         "Generate with: node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\"",
     )
   }
+  const blobStoreKind: 'filesystem' | 's3' =
+    process.env.BLOB_STORE === 's3' ? 's3' : 'filesystem'
   cached = {
     publicUrl: publicUrl.replace(/\/$/, ''),
     hostname,
     serviceDid: `did:web:${hostname}`,
     jwtSecret: hexToBytes(jwtSecretHex),
     localPlcOnly: process.env.PDS_LOCAL_PLC !== 'false',
+    blobStoreKind,
+    blobStoreDir: required('BLOB_DIR', './.blobs'),
   }
   return cached
 }
