@@ -358,6 +358,107 @@ cryptographically valid.
    cleanly, or does the client see a corrupt CAR? What would you change
    if you wanted a more graceful failure?
 
+## Sync endpoints
+
+CAR is a wire format. The endpoints under `com.atproto.sync.*` are what
+puts CARs *on* the wire. They're the half-dozen routes a relay, an
+archiver, or another PDS calls to learn the state of this one.
+
+| Endpoint | Body | Purpose |
+| --- | --- | --- |
+| `getRepo` | CAR | full repository |
+| `getBlocks` | CAR | specific blocks by CID |
+| `getRecord` | CAR | one record + Merkle proof |
+| `getLatestCommit` | JSON | `{ cid, rev }` |
+| `getRepoStatus` | JSON | `{ did, active, status?, rev? }` |
+| `listRepos` | JSON | paginated repo enumeration |
+
+The three CAR endpoints are the ones the chapter has been building up to.
+`getRepo` is the export; `getBlocks` is the random-access slice;
+`getRecord` is the targeted Merkle proof. The three JSON endpoints are the
+catalog the others hang off — a relay calls `listRepos` first, then
+`getLatestCommit` per repo to decide whether a backfill is needed, then
+`getRepo` to actually pull the bytes.
+
+### Walking the MST for `getRepo`
+
+The interesting part of `getRepo` is enumerating which blocks belong in
+the CAR. The set is: the signed commit, the MST root, every internal MST
+node, and every leaf value (one CID per record). The naïve plan is "scan
+`repo_blocks` for this DID" — and that mostly works — but it loses any
+ordering signal and would also include orphans the GC hasn't reaped yet.
+Walking the tree is more honest.
+
+We do it by hand rather than reaching into `MST` internals. The MST class
+manages a *mutable* in-memory tree intended for `add`/`update`/`delete`;
+for export we just want to read. So `src/pds/repo/sync.ts` decodes one
+MST node at a time and recurses:
+
+```ts
+async function walkMst(repoDid, nodeCid, out, seen) {
+  if (seen.has(nodeCid.toString())) return
+  seen.add(nodeCid.toString())
+  out.push(nodeCid)
+
+  const block = await getBlock(repoDid, nodeCid)
+  const node = await decode<MstNode>(block.bytes, nodeCid)
+
+  if (node.l) await walkMst(repoDid, node.l, out, seen)
+  for (const entry of node.e) {
+    out.push(entry.v)                                // leaf value CID
+    if (entry.t) await walkMst(repoDid, entry.t, out, seen)
+  }
+}
+```
+
+That's the whole traversal: depth-first, left-pointer first, then each
+`(leaf, right-pointer)` pair in order. The `seen` set is paranoia — MSTs
+share blocks across commits, and a future change to this code path that
+walks history would otherwise re-emit the same block.
+
+Once we have the CID list we stream them through `encodeCarChunks`:
+
+```ts
+const blocks = (async function* () {
+  for (const cid of cids) yield await getBlock(repoDid, cid)
+})()
+const car = encodeCarChunks({ roots: [commitCid], blocks })
+return new Response(new ReadableStream({ ... }))
+```
+
+No buffering. The first byte of the CAR header can be on the wire before
+the second block has been read from postgres.
+
+### Records vs proofs
+
+`getRecord` is the same machinery, narrowed. Instead of emitting every
+block we emit only the ones a consumer needs to verify *one* record: the
+commit, every MST node along the path from root to the relevant leaf,
+plus the leaf's value block. The result is a Merkle proof — the consumer
+can hash-check the chain back to the signed commit and convince itself
+the record really exists in this repo at this revision, without holding
+the rest of the tree.
+
+The path-walk decoder mirrors the MST's lookup logic: at each node,
+reconstruct the leaf keys (the prefix-compressed `e[i].k` bytes), find
+the slot the record key falls into, and recurse through the appropriate
+pointer. That gives a list of `O(log n)` nodes plus one leaf — usually
+six or seven blocks for a healthy account, regardless of how many
+records the repo holds.
+
+> ⚠️ Our `getRecord` currently only accepts the *head* commit. The
+> lexicon allows a historical `commit` CID; we reject anything else with
+> `CommitNotFound` because we don't retain old roots. That's a deferred
+> feature, not a protocol violation.
+
+### `since`, briefly
+
+`getRepo` accepts a `since=<rev>` parameter that, in principle, lets a
+caller request "only blocks newer than this revision". Implementing it
+properly needs either time-tagged block rows or the previous MST root to
+diff against. For now we accept the parameter and ignore it — the
+consumer pulls the whole repo and discards what it already has.
+
 ## Up next
 
 CAR gets bytes out of the PDS. The next chapter, [09 — Lexicons](./09-lexicons.md),
