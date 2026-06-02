@@ -19,7 +19,7 @@
 
 import { eq, and } from 'drizzle-orm'
 import { db } from '~/lib/db'
-import { accounts, repos, records } from '~/lib/db/schema'
+import { accounts, repos, records, recordBlobs } from '~/lib/db/schema'
 import {
   encode,
   parseCid,
@@ -34,6 +34,7 @@ import { nextTid, isValidTid } from './tid'
 import { getBlock, putBlocks } from './blockstore'
 import { encodeCar } from '~/pds/car/encode'
 import { emitCommit } from '~/pds/sequencer/sequence'
+import { extractBlobCids } from '~/pds/blob/refs'
 
 export type Write =
   | { action: 'create'; collection: string; rkey?: string; value: unknown }
@@ -128,6 +129,7 @@ export async function applyWrites(args: {
   // the CID before mutating the tree.
   const newBlocks: Block[] = []
   const indexOps: IndexOp[] = []
+  const blobOps: BlobOp[] = []
   const applied: AppliedWrite[] = []
 
   for (const w of args.writes) {
@@ -142,17 +144,15 @@ export async function applyWrites(args: {
       const block = await encode(w.value)
       newBlocks.push(block)
       mst = await safeMstAdd(mst, w.collection, rkey, block.cid)
+      const uri = makeUri(args.did, w.collection, rkey)
       indexOps.push({
         kind: 'upsert',
         collection: w.collection,
         rkey,
         cid: block.cid.toString(),
       })
-      applied.push({
-        action: 'create',
-        uri: makeUri(args.did, w.collection, rkey),
-        cid: block.cid,
-      })
+      collectBlobOps(blobOps, args.did, uri, w.value, /*detachFirst*/ false)
+      applied.push({ action: 'create', uri, cid: block.cid })
       continue
     }
 
@@ -162,33 +162,32 @@ export async function applyWrites(args: {
       const block = await encode(w.value)
       newBlocks.push(block)
       mst = await safeMstUpdate(mst, w.collection, w.rkey, block.cid)
+      const uri = makeUri(args.did, w.collection, w.rkey)
       indexOps.push({
         kind: 'upsert',
         collection: w.collection,
         rkey: w.rkey,
         cid: block.cid.toString(),
       })
-      applied.push({
-        action: 'update',
-        uri: makeUri(args.did, w.collection, w.rkey),
-        cid: block.cid,
-      })
+      // Update: clear old attachments before re-attaching from the new value.
+      // The simple swap covers added refs, removed refs, and unchanged refs
+      // in one shape — no diffing needed.
+      collectBlobOps(blobOps, args.did, uri, w.value, /*detachFirst*/ true)
+      applied.push({ action: 'update', uri, cid: block.cid })
       continue
     }
 
     // delete
     assertValidRkey(w.rkey)
     mst = await safeMstDelete(mst, w.collection, w.rkey)
+    const uri = makeUri(args.did, w.collection, w.rkey)
     indexOps.push({
       kind: 'delete',
       collection: w.collection,
       rkey: w.rkey,
     })
-    applied.push({
-      action: 'delete',
-      uri: makeUri(args.did, w.collection, w.rkey),
-      cid: null,
-    })
+    blobOps.push({ kind: 'detach', repoDid: args.did, recordUri: uri })
+    applied.push({ action: 'delete', uri, cid: null })
   }
 
   // 6. Serialize the new tree.
@@ -216,6 +215,7 @@ export async function applyWrites(args: {
         newRootCid: commitBlock.cid.toString(),
         newRev: rev,
         indexOps,
+        blobOps,
       })
     })
   } catch (err) {
@@ -226,6 +226,7 @@ export async function applyWrites(args: {
         newRootCid: commitBlock.cid.toString(),
         newRev: rev,
         indexOps,
+        blobOps,
       })
     } else {
       throw err
@@ -268,12 +269,17 @@ type IndexOp =
   | { kind: 'upsert'; collection: string; rkey: string; cid: string }
   | { kind: 'delete'; collection: string; rkey: string }
 
+type BlobOp =
+  | { kind: 'attach'; repoDid: string; recordUri: string; blobCid: string }
+  | { kind: 'detach'; repoDid: string; recordUri: string }
+
 type PersistArgs = {
   did: string
   blocks: Block[]
   newRootCid: string
   newRev: string
   indexOps: IndexOp[]
+  blobOps: BlobOp[]
 }
 
 // We accept `any` here because drizzle's tx type differs by driver and the
@@ -283,6 +289,21 @@ type WriteHandle = {
   update: typeof db.update
   insert: typeof db.insert
   delete: typeof db.delete
+}
+
+function collectBlobOps(
+  out: BlobOp[],
+  repoDid: string,
+  recordUri: string,
+  value: unknown,
+  detachFirst: boolean,
+): void {
+  if (detachFirst) {
+    out.push({ kind: 'detach', repoDid, recordUri })
+  }
+  for (const blobCid of extractBlobCids(value)) {
+    out.push({ kind: 'attach', repoDid, recordUri, blobCid })
+  }
 }
 
 async function persistCommit(handle: WriteHandle, args: PersistArgs): Promise<void> {
@@ -320,6 +341,31 @@ async function persistCommit(handle: WriteHandle, args: PersistArgs): Promise<vo
             eq(records.rkey, op.rkey),
           ),
         )
+    }
+  }
+
+  // Blob attachments. Order is significant: an update emits a detach followed
+  // by zero-or-more attaches for the same URI; running attach-before-detach
+  // would wipe the rows we just inserted.
+  for (const op of args.blobOps) {
+    if (op.kind === 'detach') {
+      await handle
+        .delete(recordBlobs)
+        .where(
+          and(
+            eq(recordBlobs.repoDid, op.repoDid),
+            eq(recordBlobs.recordUri, op.recordUri),
+          ),
+        )
+    } else {
+      await handle
+        .insert(recordBlobs)
+        .values({
+          repoDid: op.repoDid,
+          recordUri: op.recordUri,
+          blobCid: op.blobCid,
+        })
+        .onConflictDoNothing()
     }
   }
 }

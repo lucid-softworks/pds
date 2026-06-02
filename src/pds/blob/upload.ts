@@ -31,7 +31,13 @@ export type BlobRef = {
   size: number
 }
 
-/** Hash bytes, write them to the store, persist the metadata row. */
+/** Hash bytes, write them to the store, persist the metadata row.
+ *
+ *  Note: we do not check that the uploaded CID matches any existing record
+ *  reference — the client uploads bytes *first* and constructs the record
+ *  that names them seconds later. Attachment happens in `applyWrites` via
+ *  `extractBlobCids`; until then the blob sits unreferenced and the GC sweep
+ *  (`src/pds/blob/gc.ts`) leaves it alone until the grace window expires. */
 export async function uploadBlob(args: {
   creator: string
   bytes: Uint8Array

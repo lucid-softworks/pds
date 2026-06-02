@@ -100,7 +100,9 @@ Internally the handler does three things, in order:
 The blob is now persisted and addressable, but it is **not attached to
 any record**. The upload endpoint takes no record reference; it can't,
 because the client typically uploads several blobs first and only then
-constructs the record that names them all.
+constructs the record that names them all. Attachment happens later,
+in `applyWrites`, when the record value carrying the blob's CID is
+written — see the next section.
 
 > ⚠️ **No resumable uploads.** Production PDSes accept multipart and TUS
 > for blobs measured in tens of megabytes. We don't — the handler reads
@@ -126,12 +128,39 @@ record_blobs (
 )
 ```
 
-The records subsystem populates this table at write time. When a record
-is created with a blob ref in its body, we extract every `$type: 'blob'`
-node (or every CID-link, in CBOR), and write one `record_blobs` row per
-unique CID. On record deletion the rows go too — the FK to `accounts`
-cascades on account delete, and the records writer deletes per-record
-rows explicitly on rkey deletion or update.
+The records subsystem populates this table at write time. `applyWrites`
+calls `extractBlobCids(value)` from `src/pds/blob/refs.ts` for every
+create and update, then emits a parallel stream of `blobOps` next to
+the existing `indexOps`:
+
+```ts
+type BlobOp =
+  | { kind: 'attach'; repoDid; recordUri; blobCid }
+  | { kind: 'detach'; repoDid; recordUri }   // wipes all rows for a URI
+```
+
+`extractBlobCids` is a recursive walk that bottoms out on the leaf
+shape `{ $type: 'blob', ref, ... }`. It handles both the JSON envelope
+(`ref: { $link: '<cid>' }`) and the CBOR-decoded form (`ref` is a real
+`CID` instance) by funnelling both through `CID.asCID` and falling back
+to `$link` only when that returns null. A blob ref is a leaf — we don't
+recurse into its `mimeType`/`size` siblings — and the walker is
+idempotent: running it twice over the same value returns the same set.
+
+The blobOps fire inside the same transaction as the records-table
+updates, in `persistCommit`:
+
+- **create** → one `attach` per unique CID in the value.
+- **update** → a single `detach` for the URI, then one `attach` per
+  unique CID in the new value. Order matters — detach-then-attach
+  handles "added a ref," "removed a ref," and "unchanged ref" without
+  a diff.
+- **delete** → one `detach`. No attaches.
+
+Because attaches and detaches commit atomically with the records-row
+mutation, the join table never disagrees with the records index about
+which (repo, URI) pairs exist. On `applyWrites` failure, both roll
+back together.
 
 The point of this table is **GC visibility**. Without it, "is this blob
 still referenced by anything?" would require walking every record in
@@ -209,22 +238,23 @@ pass them through unchanged. It's a three-line check in
 
 Uploaded-but-never-referenced blobs are a footgun. A client that
 uploads a draft image and never publishes the post leaves bytes
-sitting on disk forever. We solve this with a periodic sweep:
+sitting on disk forever. The sweep lives in `src/pds/blob/gc.ts` and
+is a single SQL query plus a per-row store delete:
 
 ```sql
-SELECT cid, store_key FROM blobs
- WHERE NOT EXISTS (
-   SELECT 1 FROM record_blobs WHERE blob_cid = blobs.cid
- )
-   AND created_at < now() - interval '24 hours';
+SELECT cid, size, store_key FROM blobs
+ WHERE created_at < now() - interval '24 hours'
+   AND NOT EXISTS (
+     SELECT 1 FROM record_blobs WHERE blob_cid = blobs.cid
+   );
 ```
 
-For each row returned, we delete the bytes from the store and then the
-metadata row. The 24-hour grace window is essential: a typical client
-uploads the blob, **then** constructs and publishes the record that
-references it, and those two requests are not atomic. Without the
-grace, a slow phone could see its just-uploaded image vanish before
-the post lands.
+For each row returned, `gcBlobs` deletes the bytes from the store and
+then the `blobs` metadata row. The 24-hour grace window is essential:
+a typical client uploads the blob, **then** constructs and publishes
+the record that references it, and those two requests are not atomic.
+Without the grace, a slow phone could see its just-uploaded image
+vanish before the post lands.
 
 The grace is also why we do not delete bytes on the spot when a record
 is deleted. Edits frequently re-attach the same blob to a successor
@@ -232,6 +262,70 @@ record; if the user reposts the same image five minutes later, we want
 that to be a no-op rather than an upload-then-attach round trip. The
 sweep eventually catches genuinely orphaned blobs without disturbing
 the common case.
+
+### The race window
+
+Between the candidate `SELECT` and the per-row `DELETE`, a concurrent
+`applyWrites` might attach one of our candidates to a brand-new
+record. The race is real and worth naming explicitly. We run the
+candidate query inside `db.transaction`, which gives the sweep a
+consistent MVCC snapshot: a concurrent attach either commits before
+our snapshot (visible in the EXISTS sub-select, sparing the blob) or
+commits after our DELETE (against a non-existent blob, surfacing as a
+dangling `record_blobs` row with no `blobs` partner — harmless and
+caught by the next sweep).
+
+The store bytes still get deleted **outside** the transaction, because
+filesystem and S3 I/O can't be rolled back. That leaves one narrow
+window: if the row-DELETE is rolled back by a concurrent attach of the
+*same* CID, the bytes are gone but the new record's reference dangles.
+The grace window plus blob refs being content-addressed bounds the
+damage — a re-upload restores the same bytes — but the divergence is
+worth flagging.
+
+### Cadence
+
+```ts
+import { startBlobGc } from '~/pds/blob/gc'
+
+const stop = startBlobGc({
+  intervalMs: 60 * 60 * 1000,   // hourly
+  graceMs: 24 * 60 * 60 * 1000, // grace = 1 day
+})
+```
+
+`startBlobGc` is a `setInterval` wrapper that returns a stop function.
+It's good enough for the dev loop. Production deployments should run
+`gcBlobs()` from a real scheduler — cron via systemd timers, BullMQ,
+Temporal — where retries, observability, and process restarts are
+first-class. The setInterval handle is `unref`'d so it doesn't keep
+the Node event loop alive on its own.
+
+> 📖 **Divergence from upstream.** The reference PDS uses a more
+> sophisticated reference-counting scheme: each blob carries a
+> per-record refcount that the records writer increments and
+> decrements transactionally, and bytes are deleted when the count
+> hits zero (plus a grace window). The join-table-plus-sweep approach
+> we ship here is simpler — one INSERT per attach, one DELETE per
+> detach, one periodic SELECT — and adequate for a teaching port.
+
+### Try it
+
+Force an immediate sweep from a shell:
+
+```bash
+pnpm tsx -e "
+import { gcBlobs } from './src/pds/blob/gc'
+gcBlobs({ graceMs: 0 }).then((r) => {
+  console.log('gc result:', r)
+  process.exit(0)
+})
+"
+```
+
+`graceMs: 0` ignores the grace window and reaps everything that
+currently has no record reference — handy for tests, dangerous in
+production.
 
 > ⚠️ **No cross-account deduplication.** Two users uploading the same
 > image get two `blobs` rows and two copies of the bytes on disk. The
