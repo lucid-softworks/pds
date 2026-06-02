@@ -89,6 +89,57 @@ function extractTitleAndBlurb(
   return { title, blurb }
 }
 
+// Rewrite `[…](./12-accounts.md)`-style chapter links to `/docs/<slug>` so the
+// HTML rendered in the docs site resolves them correctly. The raw markdown
+// keeps working when viewed on GitHub or in an editor — only the in-app
+// rendering is affected.
+//
+// Patterns rewritten:
+//   ./NN-slug.md(#frag)?   →  /docs/slug(#frag)?
+//   NN-slug.md(#frag)?     →  /docs/slug(#frag)?
+//   ./README.md(#frag)?    →  /docs(#frag)?
+//   README.md(#frag)?      →  /docs(#frag)?
+//
+// Anything else (absolute URLs, external links, in-page hashes, paths into
+// ../src/...) is left untouched.
+const CHAPTER_LINK_RE = /^(?:\.\/)?(\d{2})-([a-z0-9-]+)\.md(#.*)?$/
+const README_LINK_RE = /^(?:\.\/)?README\.md(#.*)?$/
+
+type HastNode = {
+  type: string
+  tagName?: string
+  properties?: Record<string, unknown>
+  children?: HastNode[]
+}
+
+function rewriteDocsLinks() {
+  return (tree: HastNode) => {
+    visit(tree, (node) => {
+      if (node.type !== 'element' || node.tagName !== 'a') return
+      const href = node.properties?.href
+      if (typeof href !== 'string') return
+      const rewritten = rewriteHref(href)
+      if (rewritten !== href) {
+        node.properties = { ...node.properties, href: rewritten }
+      }
+    })
+  }
+}
+
+function rewriteHref(href: string): string {
+  const ch = CHAPTER_LINK_RE.exec(href)
+  if (ch) return `/docs/${ch[2]}${ch[3] ?? ''}`
+  const rm = README_LINK_RE.exec(href)
+  if (rm) return `/docs${rm[1] ?? ''}`
+  return href
+}
+
+function visit(node: HastNode, fn: (n: HastNode) => void): void {
+  fn(node)
+  if (!node.children) return
+  for (const child of node.children) visit(child, fn)
+}
+
 let processor: ReturnType<typeof buildProcessor> | null = null
 
 function buildProcessor() {
@@ -101,6 +152,7 @@ function buildProcessor() {
       behavior: 'wrap',
       properties: { className: ['heading-anchor'] },
     })
+    .use(rewriteDocsLinks)
     .use(rehypeShiki, {
       themes: { light: 'github-light', dark: 'tokyo-night' },
       defaultColor: 'dark',
