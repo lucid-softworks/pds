@@ -40,6 +40,10 @@ export const accounts = pgTable(
       .notNull(),
     // 'active' | 'takendown' | 'deactivated' | 'deleted'
     status: text('status').default('active').notNull(),
+    // Nullable: NULL means the address has never been confirmed. Set by
+    // confirmEmail, cleared by updateEmail so the new address is reconfirmed.
+    // See chapter 13 — Authentication.
+    emailConfirmedAt: timestamp('email_confirmed_at', { withTimezone: true }),
   },
   (t) => ({
     handleIdx: uniqueIndex('accounts_handle_idx').on(t.handle),
