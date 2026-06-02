@@ -22,45 +22,54 @@ The docs site is part of the app. Run it locally and read at
 | Merkle Search Trees | [`src/pds/repo/mst.ts`](./src/pds/repo/mst.ts) | [06](./docs/06-merkle-search-tree.md) |
 | Signed commits | [`src/pds/repo/commit.ts`](./src/pds/repo/commit.ts) | [07](./docs/07-commits-and-signing.md) |
 | CAR encode/decode | [`src/pds/car/`](./src/pds/car/) | [08](./docs/08-car-files.md) |
-| Lexicons | [`src/pds/lexicon/`](./src/pds/lexicon/) (validator landing in wave 3) | [09](./docs/09-lexicons.md) |
+| Lexicons | [`src/pds/lexicon/`](./src/pds/lexicon/) — runtime validator, observe-only | [09](./docs/09-lexicons.md) |
 | XRPC dispatcher | [`src/pds/xrpc/server.ts`](./src/pds/xrpc/server.ts) | [10](./docs/10-xrpc.md) |
 | Database schema | [`src/lib/db/schema/`](./src/lib/db/schema/) | [11](./docs/11-database-schema.md) |
 | Account creation | [`src/pds/account/create.ts`](./src/pds/account/create.ts) + DID layer | [12](./docs/12-accounts.md) |
-| Sessions + auth | [`src/pds/auth/`](./src/pds/auth/) | [13](./docs/13-authentication.md) |
+| Sessions + auth | [`src/pds/auth/`](./src/pds/auth/) — sessions, app passwords, email, password reset, lifecycle | [13](./docs/13-authentication.md) |
 | Records (CRUD) | [`src/pds/repo/writes.ts`](./src/pds/repo/writes.ts) | [14](./docs/14-records.md) |
-| Blobs | [`src/pds/blob/`](./src/pds/blob/) | [15](./docs/15-blobs.md) |
-| Sequencer | [`src/pds/sequencer/sequence.ts`](./src/pds/sequencer/sequence.ts) | [16](./docs/16-firehose.md) |
+| Blobs | [`src/pds/blob/`](./src/pds/blob/) — upload, attachment, GC | [15](./docs/15-blobs.md) |
+| Sequencer + firehose | [`src/pds/sequencer/`](./src/pds/sequencer/) — write path + WebSocket subscribeRepos | [16](./docs/16-firehose.md) |
 | Sync endpoints | [`src/pds/repo/sync.ts`](./src/pds/repo/sync.ts) + handlers | [17](./docs/17-pds-appview-relay.md) |
 | Production guide | — | [18](./docs/18-production.md) |
+| Moderation / admin | [`src/pds/xrpc/handlers/com.atproto.admin.*`](./src/pds/xrpc/handlers/) | [19](./docs/19-moderation.md) |
 
-**Implemented XRPC endpoints** (22):
+**Implemented XRPC endpoints** (51 + 1 WebSocket subscription):
 
 | Namespace | Endpoints |
 | --- | --- |
-| `com.atproto.server.*` | createAccount, createSession, refreshSession, deleteSession, getSession, describeServer |
-| `com.atproto.identity.*` | resolveHandle |
+| `com.atproto.server.*` (account) | createAccount, createSession, refreshSession, deleteSession, getSession, describeServer, checkAccountStatus, deactivateAccount, activateAccount, requestAccountDelete, deleteAccount |
+| `com.atproto.server.*` (app pw) | createAppPassword, listAppPasswords, revokeAppPassword |
+| `com.atproto.server.*` (email) | requestEmailConfirmation, confirmEmail, requestEmailUpdate, updateEmail, requestPasswordReset, resetPassword |
+| `com.atproto.server.*` (invites) | createInviteCode, createInviteCodes, getAccountInviteCodes, checkSignupQueue |
+| `com.atproto.identity.*` | resolveHandle, updateHandle, requestPlcOperationSignature, signPlcOperation |
 | `com.atproto.repo.*` | createRecord, putRecord, deleteRecord, getRecord, listRecords, applyWrites, describeRepo, uploadBlob |
-| `com.atproto.sync.*` | getRepo, getBlocks, getRecord, getLatestCommit, getRepoStatus, listRepos, getBlob |
+| `com.atproto.sync.*` (HTTP) | getRepo, getBlocks, getRecord, getLatestCommit, getRepoStatus, listRepos, getBlob |
+| `com.atproto.sync.*` (WS) | subscribeRepos |
+| `com.atproto.admin.*` | getAccountInfo, getAccountInfos, updateAccountStatus, updateAccountHandle, updateAccountEmail, sendEmail, deleteAccount |
 | `/.well-known/*` | did.json (service DID document) |
 
-The PDS supports account creation, login, posting, reading, listing, blob
-upload, repo export — the full "client can sign in and post" flow.
+The PDS supports the full single-user flow a Bluesky client would put it
+through, plus the operator surface for moderation work.
 
-## Status (in progress)
+## Status
 
 - ✅ Foundation (app shell, docs UI, markdown pipeline, DB layer)
 - ✅ Account creation end-to-end with did:plc (local-only in dev)
 - ✅ Session lifecycle + identity + server discovery
+- ✅ App passwords + email confirmation + password reset
+- ✅ Full account lifecycle (deactivate/activate/delete with tombstone)
+- ✅ Invite-code gate (optional)
+- ✅ Identity rotation (`updateHandle` via PLC chain)
 - ✅ Full Merkle Search Tree + commits + CAR
-- ✅ Records CRUD with MST commits
+- ✅ Records CRUD with MST commits + blob attachment tracking + GC
 - ✅ Blob storage (filesystem dev, S3 stub)
-- ✅ Sequencer (firehose write path)
+- ✅ Sequencer + WebSocket firehose (subscribeRepos)
 - ✅ Sync endpoints for federation
-- 🚧 WebSocket firehose (`subscribeRepos`)
-- 🚧 Lexicon runtime validator
-- 🚧 App passwords
-- 🚧 Email confirmation + password reset
-- 📝 OAuth, account migration, moderation surface — chapter 18 punts these to follow-ups
+- ✅ Lexicon runtime validator (observe-only by default)
+- ✅ Admin / moderation surface (HTTP Basic, env-var hash)
+- 🚧 Account migration (`importRepo`, `reserveSigningKey`, `getServiceAuth`)
+- 📝 OAuth — chapter 13 + 18 punts this to a follow-up
 
 ## Try it
 
