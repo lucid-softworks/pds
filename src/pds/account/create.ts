@@ -33,12 +33,14 @@ import { hashPassword } from '~/pds/auth/password'
 import { createSessionTokens } from '~/pds/auth/session'
 import { emitIdentity, emitAccount } from '~/pds/sequencer/sequence'
 import { buildDidDocument, type DidDocument } from '~/pds/did/document'
-import { BadRequest, Conflict, XrpcError } from '~/pds/xrpc/errors'
+import { BadRequest, Conflict, Unauthorized, XrpcError } from '~/pds/xrpc/errors'
+import { peekInviteCode, reserveInviteCode } from './invites'
 
 export type CreateAccountInput = {
   handle: string
   email: string
   password: string
+  inviteCode?: string
 }
 
 export type CreateAccountResult = {
@@ -58,12 +60,27 @@ export async function createAccount(
   // ── 2. Check uniqueness ────────────────────────────────────────────────
   await assertNotTaken(input.handle, input.email)
 
+  // ── 2b. Invite-code pre-flight ─────────────────────────────────────────
+  //
+  // We split the invite check in two: a non-mutating *peek* now, and the
+  // decrement+audit *reserve* after the account row is in. The DID isn't
+  // known until step 4, so we can't enforce a `forAccount` recipient gate
+  // here — that check runs again under `reserveInviteCode` once we have a
+  // DID. The peek catches the common failures (unknown / disabled /
+  // exhausted) before we burn a PLC op.
+  const cfg = getConfig()
+  if (cfg.inviteRequired) {
+    if (!input.inviteCode) {
+      throw Unauthorized('invite code required', 'InvalidInviteCode')
+    }
+    await peekInviteCode({ code: input.inviteCode, candidateDid: null })
+  }
+
   // ── 3. Generate keys ───────────────────────────────────────────────────
   const signingKey = generateKeypair()
   const rotationKey = generateKeypair()
 
   // ── 4. Build + sign the genesis PLC op locally, derive the DID ─────────
-  const cfg = getConfig()
   const { did } = await createLocalPlc({
     handle: input.handle,
     rotationKeyPriv: rotationKey.privateKeyHex,
@@ -87,6 +104,15 @@ export async function createAccount(
       rotationKeyPriv: rotationKey.privateKeyHex,
       rotationKeyPub: rotationKey.publicKeyMultibase,
     })
+
+    // ── 6b. Consume the invite code ─────────────────────────────────────
+    // Done after the account row lands so that the audit log can name a
+    // real DID and so we never decrement a code on a signup that failed at
+    // INSERT. If this throws (e.g. a racer drained the last use between
+    // peek and now), the outer catch rolls back the account and PLC op.
+    if (cfg.inviteRequired && input.inviteCode) {
+      await reserveInviteCode({ code: input.inviteCode, usedBy: did })
+    }
 
     // ── 7. Create the empty signed repo ──────────────────────────────────
     await createGenesisRepo({

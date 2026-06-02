@@ -24,6 +24,7 @@ const InputSchema = z.object({
   handle: z.string().min(1),
   email: z.string().min(1),
   password: z.string().min(1),
+  inviteCode: z.string().min(1).optional(),
 })
 
 const handler: Handler = async ({ input }) => {

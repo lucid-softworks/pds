@@ -326,6 +326,136 @@ A proper transaction is a follow-up chapter. The shape of `createAccount`
 makes it straightforward to wrap once we have the transaction primitives in
 place.
 
+## Invite codes
+
+By default the PDS accepts signups from anyone with a valid handle. That's
+the right policy for a learning environment and for any operator who wants
+their server to behave like the public ones. It is not the right policy for
+a private PDS — a handful of friends, a family group, a research cohort —
+where you'd rather the front door require a key.
+
+Setting `PDS_INVITE_REQUIRED=true` flips the gate. After that env var
+change, every call to `createAccount` must include a valid `inviteCode` or
+it returns `InvalidInviteCode` (HTTP 401) and never touches the database.
+
+### Code shape
+
+Codes look like `pds-x2k4g-9p3qm`: a literal `pds-` prefix, then two
+five-character groups of lowercase base32, separated by a hyphen. The ten
+data characters carry ~50 bits of entropy, drawn from
+`crypto.randomBytes(8)` and base32-encoded via the same
+`multiformats/bases/base32` package the PLC module uses. At ~10¹⁵ possible
+codes, brute-forcing one isn't tractable against the rate limits any sane
+operator will apply.
+
+The format isn't load-bearing — it's just a short, human-typable string.
+The database has no opinion on its shape beyond uniqueness; if a future
+chapter wants to add per-PDS branding (`mypds-...`) the schema doesn't need
+to change.
+
+### Two ways to mint
+
+**Admin-side.** The operator authenticates with the configured admin
+password (Basic auth, chapter 19) and calls
+`com.atproto.server.createInviteCode` for a single code or
+`createInviteCodes` to bulk-mint. Both accept an optional `useCount`
+(default 1) and an optional recipient binding — either `forAccount: did`
+on the single endpoint, or a `forAccounts: did[]` array on the bulk one.
+Recipient-bound codes work like a personal invitation: only the named DID
+can redeem them, so handing out the same string twice doesn't matter.
+
+**User-side.** Every active account is supposed to receive a small
+recurring quota of personal codes — that's how Bluesky's invite tree
+worked, with each account able to mint a few codes per N days. We've shipped
+the storage and the `getAccountInviteCodes` query for it, but not yet the
+auto-issuance cron that fills `invite_codes` rows attributed to each
+account. A follow-up chapter (or your own exercise — see below) wires that
+up; for now, `getAccountInviteCodes` returns whatever codes the operator
+manually attributed to the caller, if any.
+
+### Enforcement in `createAccount`
+
+There's one subtle correctness problem: the DID we'd hand the new account
+isn't known until *after* `createLocalPlc` runs. If we consumed the invite
+code up front, a downstream failure (key collision in the unique handle
+index, repo build crash) would burn the code on a signup that never landed.
+If we consumed it at the end, we'd validate something that's already moved
+under our feet.
+
+The orchestrator splits the work in two:
+
+```
+1.  validate input
+2.  check handle/email uniqueness
+2b. peekInviteCode      ← look but don't touch
+3.  generate keys
+4.  build PLC op → derive DID
+5.  hash password
+6.  insert account row
+6b. reserveInviteCode   ← decrement + audit
+7.  build empty signed repo
+8.  issue access + refresh JWT
+```
+
+`peekInviteCode` is a pure read: it confirms the code exists, isn't
+disabled, has uses remaining, and (if `forAccount` is set) hasn't been
+reserved for someone else. `reserveInviteCode` re-runs the same checks
+under a guarded `UPDATE ... WHERE uses_remaining = $expected` decrement,
+then writes an `invite_code_uses` audit row. If two requests race past the
+peek with the last available use, exactly one wins; the loser sees the same
+`InvalidInviteCode` error a brand-new failed lookup would return.
+
+The `forAccount` recipient check runs in both passes, but only the second
+pass has a DID to compare against. The first pass can still reject obviously
+broken inputs — wrong code, exhausted, disabled — before we waste a PLC op.
+
+### Try it
+
+In a gated PDS (`PDS_INVITE_REQUIRED=true` set in the environment), mint a
+code as the operator first:
+
+```bash
+ADMIN_AUTH=$(printf 'admin:%s' "$PDS_ADMIN_PASSWORD" | base64)
+
+curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createInviteCode \
+  -H "authorization: Basic $ADMIN_AUTH" \
+  -H 'content-type: application/json' \
+  -d '{"useCount": 1}'
+# → {"code":"pds-x2k4g-9p3qm"}
+```
+
+Sign up with that code:
+
+```bash
+curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createAccount \
+  -H 'content-type: application/json' \
+  -d '{
+    "handle": "alice.test",
+    "email": "alice@example.com",
+    "password": "correcthorsebatterystaple",
+    "inviteCode": "pds-x2k4g-9p3qm"
+  }'
+# → 200, full account payload
+```
+
+Re-using the same code returns `InvalidInviteCode`:
+
+```bash
+curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createAccount \
+  -H 'content-type: application/json' \
+  -d '{
+    "handle": "bob.test",
+    "email": "bob@example.com",
+    "password": "correcthorsebatterystaple",
+    "inviteCode": "pds-x2k4g-9p3qm"
+  }'
+# → {"error":"InvalidInviteCode","message":"invite code exhausted"}
+```
+
+Omitting `inviteCode` while gated returns the same error name with a
+different message. Setting `PDS_INVITE_REQUIRED=false` (or unset) restores
+open signup; the code field is ignored when present.
+
 ## Try it
 
 After `pnpm db:migrate && pnpm dev`:
