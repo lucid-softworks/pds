@@ -21,21 +21,33 @@ import {
   verifyRefreshToken,
 } from './jwt'
 import { verifyPassword } from './password'
+import { verifyAppPassword } from './app_password'
 
 export type IssuedSession = {
   accessJwt: string
   refreshJwt: string
+  /** If this session was authenticated with an app password, its name.
+   *  Persisted on the refresh row so we can track scope across rotations. */
+  appPasswordName?: string
 }
 
-export async function createSessionTokens(did: string): Promise<IssuedSession> {
+export async function createSessionTokens(
+  did: string,
+  opts: { appPasswordName?: string } = {},
+): Promise<IssuedSession> {
   const access = await signAccessToken(did)
   const refresh = await signRefreshToken(did)
   await db.insert(refreshTokens).values({
     jti: refresh.jti,
     did,
     expiresAt: new Date(refresh.exp * 1000),
+    appPasswordName: opts.appPasswordName ?? null,
   })
-  return { accessJwt: access.jwt, refreshJwt: refresh.jwt }
+  return {
+    accessJwt: access.jwt,
+    refreshJwt: refresh.jwt,
+    ...(opts.appPasswordName ? { appPasswordName: opts.appPasswordName } : {}),
+  }
 }
 
 /** Look up an account by handle, DID, or email. Returns null on miss. */
@@ -62,7 +74,7 @@ export async function findAccountByIdentifier(
   return rows[0] ?? null
 }
 
-/** Verify password, return tokens. Throws Unauthorized on miss. */
+/** Verify password (main or app), return tokens. Throws Unauthorized on miss. */
 export async function loginWithPassword(
   identifier: string,
   password: string,
@@ -72,12 +84,23 @@ export async function loginWithPassword(
   if (!account) {
     throw Unauthorized('invalid identifier or password', 'AuthenticationRequired')
   }
-  const ok = await verifyPassword(password, account.passwordHash)
-  if (!ok) {
-    throw Unauthorized('invalid identifier or password', 'AuthenticationRequired')
+  let appPasswordName: string | undefined
+  const mainOk = await verifyPassword(password, account.passwordHash)
+  if (!mainOk) {
+    const app = await verifyAppPassword(account.did, password)
+    if (!app) {
+      throw Unauthorized(
+        'invalid identifier or password',
+        'AuthenticationRequired',
+      )
+    }
+    appPasswordName = app.name
   }
   assertAccountActive(account)
-  const tokens = await createSessionTokens(account.did)
+  const tokens = await createSessionTokens(
+    account.did,
+    appPasswordName ? { appPasswordName } : {},
+  )
   return { account, tokens }
 }
 
@@ -92,15 +115,24 @@ export async function rotateRefreshToken(refreshJwt: string): Promise<{
   // tiny TOCTOU window between this select and the delete below, but a
   // racing second refresh would just see the delete come back empty.
   const existing = await db
-    .select({ jti: refreshTokens.jti })
+    .select({
+      jti: refreshTokens.jti,
+      appPasswordName: refreshTokens.appPasswordName,
+    })
     .from(refreshTokens)
     .where(eq(refreshTokens.jti, claims.jti))
     .limit(1)
-  if (!existing[0]) {
+  const prior = existing[0]
+  if (!prior) {
     throw Unauthorized('refresh token revoked or already used', 'ExpiredToken')
   }
   await db.delete(refreshTokens).where(eq(refreshTokens.jti, claims.jti))
-  const tokens = await createSessionTokens(claims.sub)
+  // Preserve the app-password scope across the rotation; a session that
+  // logged in narrow stays narrow when its refresh token rolls over.
+  const tokens = await createSessionTokens(
+    claims.sub,
+    prior.appPasswordName ? { appPasswordName: prior.appPasswordName } : {},
+  )
   return { did: claims.sub, tokens }
 }
 
