@@ -3,7 +3,6 @@ dist
 .output
 .vinxi
 .tanstack
-src/routeTree.gen.ts
 .nitro
 .cache
 .env
