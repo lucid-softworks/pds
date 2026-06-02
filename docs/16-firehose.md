@@ -1,9 +1,5 @@
 # Event sequencer and the firehose
 
-> 🚧 The append-only event log ships in this chapter. The WebSocket endpoint
-> that streams it (`com.atproto.sync.subscribeRepos`) lands in a follow-on
-> session.
-
 The firehose is the PDS's public stream. Every commit on every account on
 this server emits an event, in order, forever. Relays subscribe. App views
 subscribe. Archive sites subscribe. Anything that wants the *push* model
@@ -160,52 +156,245 @@ records chapter takes the write path up to "blocks persisted, MST root
 updated"; this chapter picks it up at "now what does the rest of the
 world hear about it."
 
-## What's still missing
+## The WebSocket: `com.atproto.sync.subscribeRepos`
 
-🚧 **The WebSocket endpoint.** `com.atproto.sync.subscribeRepos` is a
-WebSocket subscription that streams from `repo_seq`. The framing protocol
-is two DAG-CBOR objects back-to-back (a header naming the event type and
-the payload itself), the cursor parameter resumes from a given seq, and
-the server must keep up with a per-connection backpressure budget or
-drop the laggard. None of that is built yet. It's a separate session
-because the WebSocket plumbing in TanStack Start is its own rabbit hole.
+Now that there's a log to read, the WebSocket endpoint exposes it. Clients
+connect to:
+
+```
+wss://<host>/xrpc/com.atproto.sync.subscribeRepos?cursor=<N>
+```
+
+…and the server pushes every event with seq > N, in order, forever — first
+from `repo_seq` (historical replay) and then in real time as new rows are
+written.
+
+## The framing protocol
+
+Each WebSocket message is a single binary frame containing **two DAG-CBOR
+objects back-to-back**: a small header, then the payload. There is no
+length prefix between them — the consumer relies on DAG-CBOR being
+self-delimiting. A frame on the wire looks like:
+
+```
+┌──────────────────────────┬───────────────────────────────────────┐
+│ header CBOR              │ payload CBOR                          │
+│ { op: 1, t: "#commit" }  │ { seq, repo, commit, blocks, ops, … } │
+└──────────────────────────┴───────────────────────────────────────┘
+  ~25 bytes                  hundreds of bytes to many KB
+```
+
+The header tells the reader what kind of event this is. `op` is a small
+integer; `t` names the variant.
+
+```ts
+// op = 1: a message; `t` names which kind
+{ op: 1, t: '#commit' }    // payload follows
+{ op: 1, t: '#identity' }
+{ op: 1, t: '#account' }
+{ op: 1, t: '#info' }
+{ op: 1, t: '#sync' }
+{ op: 1, t: '#tombstone' }
+
+// op = -1: an error; no further payload. The CBOR object is itself the body.
+{ op: -1, error: 'FutureCursor', message: 'cursor 9001 > latest 42' }
+```
+
+Because the per-row `event` column already holds the canonical DAG-CBOR
+bytes of the payload, the server never re-encodes payloads. It encodes
+only the header, then concatenates `header.bytes + row.event` into a
+single binary WebSocket message:
+
+```ts
+const header = await encode({ op: 1, t: row.eventType })
+const frame = new Uint8Array(header.bytes.length + row.event.length)
+frame.set(header.bytes, 0)
+frame.set(row.event, header.bytes.length)
+ws.send(frame)
+```
+
+That's the entire wire format. The structured payloads underneath are:
+
+- **`#commit`** — `{ seq, rebase, tooBig, repo, commit, prev, rev, since,
+  blocks, ops, blobs, time }`. `blocks` is the CAR with all new MST nodes
+  and the commit block. `ops` is the array of `{ action, path, cid }`.
+- **`#identity`** — `{ seq, did, time, handle? }`. Handle rotation, DID
+  doc swap, anything that should cause a re-resolve.
+- **`#account`** — `{ seq, did, time, active, status? }`. Account state
+  change (takendown, deactivated, deleted, suspended).
+- **`#info`** — `{ name, message }`. Out-of-band notes from the server,
+  e.g. `OutdatedCursor`. No `seq`. 🚧 not yet emitted by our impl.
+- **`#sync`** — full repo re-sync hint. Rare; we don't emit it yet.
+- **`#tombstone`** — `{ seq, did, time }`. Account fully deleted.
+
+## Cursor semantics
+
+`cursor=N` resumes from the event with seq > N. `cursor=0` (or omitted)
+replays from the very first row. Three outcomes:
+
+| State | Server response |
+| --- | --- |
+| `cursor ≤ latestSeq` | Replay history, then tail. The happy path. |
+| `cursor > latestSeq` | One `op: -1, error: "FutureCursor"` frame, then close. |
+| Cursor older than what's still in `repo_seq` | 🚧 `op: 1, t: "#info", { name: "OutdatedCursor" }`, then close. Not implemented yet — we don't have retention. |
+
+A well-behaved client persists the seq of the last event it processed and
+reconnects with `cursor=<that-seq>`. Because `seq` is the source of truth
+(not the wall-clock `time`), this gives at-least-once delivery semantics
+across reconnects: every event the client missed will be replayed.
+
+## Backpressure
+
+The producer can outrun a slow consumer. If a relay's network or downstream
+write throughput can't keep up, frames pile up in the server's per-socket
+send buffer and the process leaks memory.
+
+The cheap fix is to bound the send buffer and disconnect any client that
+exceeds it. We watch `ws.bufferedAmount` (the number of bytes queued by
+the OS / `ws` library but not yet flushed). When it crosses the
+`backpressureLimit` (default 1024 framed events worth — generous enough
+that a healthy client never trips it), we send:
+
+```ts
+{ op: -1, error: 'ConsumerTooSlow', message: '…' }
+```
+
+…and close the socket with code 1013 ("Try Again Later"). The client is
+expected to reconnect with the cursor of the last event it processed. The
+server burned no resources keeping a stalled subscriber alive.
+
+This is the **drop-the-laggard** model. The alternative — buffer forever,
+hope the consumer recovers — turns one slow consumer into a server outage.
+
+## Polling vs `LISTEN`/`NOTIFY`
+
+The tail phase needs to learn when new rows land in `repo_seq`. Production
+Postgres offers `LISTEN`/`NOTIFY`: `emit*` would issue a `NOTIFY repo_seq`
+after its UPDATE, and the WebSocket handler subscribed to the same channel
+would wake instantly.
+
+PGlite (our dev driver) doesn't surface `LISTEN`/`NOTIFY` cleanly, and the
+code in this chapter targets both. So the tail uses a 500 ms poll loop:
+every 500 ms it asks for events newer than the last-emitted `seq`. The
+worst-case emit-to-consumer latency is therefore ~500 ms in dev. Fine for
+a learning project.
+
+When we eventually wire the production Postgres path, we keep the polling
+loop as a fallback but add a `NOTIFY` wake-up channel that short-circuits
+the sleep. The code in `streamFirehose` is already shaped for this — the
+polling sleep is the only place to splice in a "wake up early" signal.
+
+## Implementation walkthrough
+
+Three files do the work:
+
+- **`src/pds/sequencer/firehose.ts`** — the transport-agnostic streaming
+  loop. `streamFirehose({ client, cursor, signal })` runs the replay-then-
+  tail logic, frames each row, and pushes it to a `FirehoseClient`
+  (anything with `send`, `close`, and `bufferedFrames`).
+- **`src/pds/sequencer/firehose-mount.ts`** — the WebSocket transport. A
+  thin adapter around the `ws` library: it owns the upgrade negotiation,
+  builds a `FirehoseClient` over the `WebSocket` object, and hands off to
+  `streamFirehose`.
+- **`vite.config.ts`** — calls `firehoseVitePlugin()` so the dev server
+  binds the upgrade handler to Vite's Node HTTP server at boot.
+
+### Why a Vite plugin, not a server file route
+
+TanStack Start's `createServerFileRoute().methods({ GET })` returns a
+`Response` object. There is no `upgrade: 'websocket'` shorthand on the
+web `Response` spec, and the underlying h3 v2 router doesn't surface a
+WebSocket route from server file routes in the version we're pinned to.
+The straightforward path is to attach to the underlying Node HTTP server
+directly — which `vite.server.httpServer` exposes during dev. That's
+exactly what `firehoseVitePlugin()` does:
+
+```ts
+configureServer(server) {
+  if (server.httpServer) attachFirehose(server.httpServer)
+}
+```
+
+`attachFirehose` opens a `WebSocketServer({ noServer: true })` and
+listens on the HTTP server's `upgrade` event. It only consumes upgrades
+whose URL path is `/xrpc/com.atproto.sync.subscribeRepos`; everything
+else (Vite's HMR socket, future endpoints) flows through unmodified.
+
+🚧 **Production wiring.** This plugin only covers `vite dev`. For
+production we need an equivalent hook at the Nitro / Node entry the
+build emits — chapter 17 will pick this up when we look at deployment.
+
+## What's still missing
 
 🚧 **The `#info` event.** Producers occasionally need to tell consumers
 "your cursor is older than what we still have on disk — you should
 re-sync from scratch." That's an `#info` frame with `name: "OutdatedCursor"`.
 Pairs with whatever retention policy we eventually adopt for `repo_seq`.
 
+🚧 **Graceful disconnect during replay.** If a client disconnects mid-
+replay (small `bufferedAmount`, just gone), we notice on the next iteration
+but might emit one more event into the closed socket. Harmless — `ws.send`
+on a closed socket is a no-op — but the loop should check `ws.readyState`
+on every iteration for a tighter shutdown.
+
+🚧 **Structured logging.** Right now connect/disconnect/error are
+console-noise. They want to land in the same logging shape as the rest of
+the PDS so operators can grep for `ConsumerTooSlow`.
+
 🚧 **Retention and compaction.** Right now `repo_seq` grows forever. The
 real system needs a policy: keep the last N days, or the last M GB, then
 trim. Consumers behind the cutoff get an `OutdatedCursor` and resync.
 
-🚧 **`LISTEN`/`NOTIFY`.** The future WebSocket handler will use Postgres'
-pub-sub to learn about new rows without polling. `emit*` will wake up
-subscribers by emitting a `NOTIFY repo_seq` after the UPDATE.
+🚧 **`LISTEN`/`NOTIFY` wake-up.** See the "Polling vs LISTEN/NOTIFY"
+section above. The poll loop works; it's just not how the production PDS
+should run.
+
+🚧 **Production WebSocket mount.** The Vite plugin only fires under
+`vite dev`. The production build needs the equivalent attached to the
+emitted Nitro / Node listener.
 
 ## Try it
 
-After `pnpm db:migrate && pnpm dev`, create an account (chapter 12) and
-write a record (chapter 14), then peek at the log:
+Spin the dev server:
 
 ```bash
-DATABASE_URL=pglite pnpm drizzle-kit studio
+pnpm db:migrate && pnpm dev
 ```
 
-Or from psql:
+Connect with [`wscat`](https://github.com/websockets/wscat):
 
-```sql
-SELECT seq, event_type, did, length(event) AS bytes
-FROM repo_seq
-ORDER BY seq DESC
-LIMIT 10;
+```bash
+wscat -c "ws://localhost:3000/xrpc/com.atproto.sync.subscribeRepos?cursor=0"
 ```
 
-You should see one `#identity` and one `#account` row from account
-creation, plus a `#commit` row for every record write. The `bytes`
-column is dominated by the CAR-encoded block diff for `#commit` rows —
-typically a few hundred bytes for a small post, more if the write touched
-a lot of MST nodes.
+If `repo_seq` is empty the socket will stay open quietly — the tail loop
+is polling every 500 ms. In another terminal, create an account (chapter
+12) and write a record (chapter 14). Each emit should surface as a binary
+frame in the `wscat` session within ~500 ms.
+
+`wscat` won't decode CBOR for you. The frames look like garbled binary
+in the terminal, which is exactly right — pipe them to a quick decoder
+to verify:
+
+```bash
+node -e '
+  const ws = new WebSocket("ws://localhost:3000/xrpc/com.atproto.sync.subscribeRepos?cursor=0");
+  ws.binaryType = "arraybuffer";
+  const cbor = await import("@ipld/dag-cbor");
+  ws.onmessage = (e) => {
+    const bytes = new Uint8Array(e.data);
+    // The first CBOR object is the header; decoding a Uint8Array slice
+    // only consumes the first object, so we decode twice to split.
+    console.log(cbor.decode(bytes));
+  };
+'
+```
+
+(That snippet only shows the header — splitting at the right byte
+boundary requires a streaming decoder. Exercise 3.)
+
+Try `cursor=99999999` to provoke a `FutureCursor` error frame, then
+inspect what comes back.
 
 ## Exercises
 
@@ -215,9 +404,10 @@ a lot of MST nodes.
    contains the same commit CID as the `commit` field.
 2. Why is the `seq` field inside the payload as well as in its own
    column? What would break if the `seq` column were the only copy?
-3. Imagine a malicious consumer that subscribes with `?cursor=0` over and
-   over. What's the cheapest way to cap the damage without breaking
-   well-behaved replay clients?
+3. Write a tiny decoder that splits a firehose frame into its two CBOR
+   objects. (Hint: `@ipld/dag-cbor`'s `decodeFirst` returns both the
+   decoded value and the consumed byte length, so you can slice the
+   remainder for the payload.) Use it to print live `#commit` payloads.
 
 ## Up next
 
