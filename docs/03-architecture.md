@@ -139,17 +139,22 @@ A whirlwind tour of paths you'll touch:
 | `src/pds/codec/` | CID + DAG-CBOR helpers ([ch. 05](./05-cid-and-dagcbor.md)) |
 | `src/pds/repo/mst.ts` | MST implementation ([ch. 06](./06-merkle-search-tree.md)) |
 | `src/pds/repo/commit.ts` | Commit signing ([ch. 07](./07-commits-and-signing.md)) |
+| `src/pds/repo/writes.ts` | applyWrites orchestrator + blob attachment ([ch. 14](./14-records.md)) |
+| `src/pds/repo/sync.ts` | Manual MST walker for the sync endpoints ([ch. 17](./17-pds-appview-relay.md)) |
 | `src/pds/car/` | CAR encode/decode ([ch. 08](./08-car-files.md)) |
-| `src/pds/lexicon/` | Lexicon parsing + validation ([ch. 09](./09-lexicons.md)) |
-| `src/pds/xrpc/server.ts` | Dispatcher ([ch. 10](./10-xrpc.md)) |
-| `src/pds/xrpc/handlers/com/atproto/...` | One file per NSID |
-| `src/pds/did/` | DID resolution ([ch. 04](./04-data-model.md), [ch. 12](./12-accounts.md)) |
-| `src/pds/auth/` | Sessions, JWTs, app passwords ([ch. 13](./13-authentication.md)) |
-| `src/pds/blob/` | Blob storage ([ch. 15](./15-blobs.md)) |
-| `src/pds/sequencer/` | Sequence numbers + firehose ([ch. 16](./16-firehose.md)) |
-| `src/lib/db/` | Drizzle schema + connection factory |
-| `drizzle/` | Generated SQL migrations |
-| `src/routes/xrpc/` | TanStack route shells that delegate to handlers |
+| `src/pds/lexicon/` | Lexicon bundle + runtime validator ([ch. 09](./09-lexicons.md)) |
+| `src/pds/xrpc/server.ts` | Dispatcher + lexicon bridge ([ch. 10](./10-xrpc.md)) |
+| `src/pds/xrpc/handlers/com.atproto.*` | One file per NSID |
+| `src/pds/did/` | did:plc creation + rotation, did:web, handle ([ch. 04](./04-data-model.md), [ch. 12](./12-accounts.md)) |
+| `src/pds/account/` | createAccount orchestrator + invite-code helpers ([ch. 12](./12-accounts.md)) |
+| `src/pds/auth/` | Sessions, JWTs, app passwords, email, password reset, admin auth ([ch. 13](./13-authentication.md), [ch. 19](./19-moderation.md)) |
+| `src/pds/blob/` | Blob storage + attachment + GC ([ch. 15](./15-blobs.md)) |
+| `src/pds/sequencer/` | Sequence write path + WebSocket firehose ([ch. 16](./16-firehose.md)) |
+| `src/lib/db/schema/` | Per-subsystem schema files behind a barrel |
+| `drizzle/` | Hand-written SQL migrations |
+| `src/routes/xrpc/$nsid.ts` | TanStack route shell that delegates to the dispatcher |
+| `src/routes/.well-known/$file.ts` | Service did:web document |
+| `scripts/` | One-off ops scripts (`demo.sh`, `admin-hash.ts`) |
 
 ## Run loop
 
