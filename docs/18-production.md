@@ -534,6 +534,86 @@ Either way: don't send the verification email synchronously from
 `createAccount`'s critical path. Queue it (or fire-and-forget with
 retries) so a slow email provider doesn't make signup feel slow.
 
+## The production Node entry
+
+In development, `pnpm dev` runs Vite, and Vite owns the HTTP server — it
+dispatches every request through the TanStack Start middleware stack
+and bolts the firehose WebSocket onto its own dev-server `upgrade`
+event (see `src/pds/sequencer/firehose-mount.ts`). In production,
+neither Vite nor the dev plugin is running. We need our own Node
+process, which is what `server.ts` at the repo root is.
+
+`pnpm build` does two things:
+
+1. `vite build` — emits the SSR fetch handler at `dist/server/server.js`
+   and the hashed client bundle under `dist/client/`. Per the TanStack
+   Start hosting docs, the SSR bundle is *not* a runnable Node entry —
+   it's a `{ fetch(request) → Response }` object you wrap in something
+   that owns the Node http.Server.
+2. `pnpm build:server` — runs esbuild on `server.ts` and inlines every
+   `./src/*` TypeScript import into a single `dist/start.mjs`. npm
+   packages stay external (loaded from `node_modules/` at runtime), so
+   the bundle is small (~36 KB) and dependencies remain
+   distro-installable.
+
+`pnpm start` is then plain `node dist/start.mjs`. No `tsx`, no
+`--experimental-strip-types`, no source files needed at runtime beyond
+the dist tree and `node_modules/`.
+
+### What `server.ts` composes
+
+```
+                     ┌─────────────────────┐
+                     │   server.ts         │
+                     │   (esbuild → mjs)   │
+                     └─────────────────────┘
+                              │
+                     ┌────────┴────────┐
+                     │                 │
+              ┌──────▼──────┐   ┌──────▼───────────┐
+              │  srvx       │   │  ws (firehose    │
+              │  fetch +    │   │  upgrade handler)│
+              │  static     │   └──────────────────┘
+              └──────┬──────┘
+                     │
+        ┌────────────┴─────────────┐
+        ▼                          ▼
+   dist/client/*           dist/server/server.js
+   (static, cached)        (.fetch handler)
+```
+
+- [`srvx`](https://srvx.h3.dev) is unjs's tiny Fetch→Node adapter. We
+  hand it our composite `fetch(req)` and a hostname/port; it gives back
+  an object that exposes the underlying `http.Server`. The fetch
+  composite first tries to satisfy the request from `dist/client/` (with
+  `Cache-Control: public, max-age=31536000, immutable` on `/_build/*`
+  hashed assets) and falls through to the Vite-emitted SSR handler for
+  everything else.
+- The `ws` WebSocketServer attaches to the underlying Node server's
+  `upgrade` event with the same `/xrpc/com.atproto.sync.subscribeRepos`
+  path-match the dev plugin uses — `streamFirehose()` from chapter 16
+  is the same in both worlds.
+- The `onShutdown` coordinator from `src/lib/shutdown.ts` gets three
+  registrations: drain the WS pool, close the DB pool, stop the HTTP
+  listener. SIGTERM from systemd / Docker / Kubernetes flows through
+  cleanly and the process exits 0 once every handler returns.
+
+### CI catches the dev/prod gap
+
+`scripts/ci-prod-smoke.sh` runs the full build, starts `dist/start.mjs`
+against a fresh PGlite, and asserts seven canonical endpoints serve
+200. The script exists because the unit tests run against the source
+tree (Vitest, Vite) and don't notice when a bundle-time gap breaks the
+prod artifact — like when `loadBundledLexicons()` was doing a runtime
+`fs.readdir` against a source-only path, or when the `.well-known/`
+directory was being silently dropped by the file-routing scanner.
+Every failed assertion in that script corresponds to a class of bug
+the test suite *can't* catch by definition; if you add another
+subsystem with a build-time gotcha, add it to `SMOKE_PATHS`.
+
+CI runs the smoke after `typecheck` + `test`. The runner uses Node 24
+to match production.
+
 ## The deploy itself
 
 A representative production layout:
