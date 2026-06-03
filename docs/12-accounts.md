@@ -476,6 +476,51 @@ Omitting `inviteCode` while gated returns the same error name with a
 different message. Setting `PDS_INVITE_REQUIRED=false` (or unset) restores
 open signup; the code field is ignored when present.
 
+## Handle verification (the other half of identity)
+
+The account row stores a `handle` (e.g. `luna.wickwork.cafe`) alongside
+the `did` (e.g. `did:plc:23leyc5tov4y4oxzei5ttv5d`). The DID is the
+durable, machine-readable identifier; the handle is the
+human-readable face. AppViews + relays need to verify that the
+handle's claim ("I'm `luna.wickwork.cafe`") and the DID document's
+claim (`alsoKnownAs: ["at://luna.wickwork.cafe"]`) agree — without
+that bidirectional check, the AppView shows `handle.invalid` on every
+post.
+
+The atproto spec defines two equivalent ways to publish the
+handle → DID side of the binding:
+
+1. **DNS TXT** — set `_atproto.<handle>` to `did=<did>`. Best for
+   handles on domains where you control DNS but don't run a server
+   (e.g. `alice.bsky.social` published from `bsky.social`'s nameserver).
+2. **HTTPS** — serve `https://<handle>/.well-known/atproto-did` with
+   the DID as the response body. Best when the handle is on a
+   subdomain of the PDS itself, because the PDS is already answering
+   HTTPS for that hostname.
+
+This PDS implements path 2 in [`src/routes/[.well-known]/$file.ts`](../src/routes/%5B.well-known%5D/$file.ts).
+The route's GET handler looks at the inbound `Host` header, looks the
+handle up in the `accounts` table, and returns the DID as
+`text/plain`. takendown/deleted accounts return 404 — we don't want a
+moderation action to keep advertising the handle binding.
+
+For the route to actually answer, two pieces have to be in place:
+
+- **DNS**: a wildcard or per-handle A record so the handle resolves
+  to the PDS box. `*.wickwork.cafe → <VPS-IP>` (DNS-only at
+  Cloudflare; no proxying) is the one-line setup. Without this, the
+  AppView's request never reaches the PDS at all.
+- **TLS**: a cert that covers the handle. Caddy's per-handle
+  HTTP-01 issuance handles this — list each handle's hostname in the
+  Caddyfile, or switch to `on_demand_tls` for autopilot. With a
+  wildcard cert from DNS-01 you can cover the whole namespace at
+  once, but that needs a DNS-API plugin (chapter 18 deploy script
+  uses HTTP-01 for the apex and adds handles on demand).
+
+The apex (`wickwork.cafe` itself) is intentionally rejected — it's
+the PDS, not a user. Hosting a user at the apex would shadow
+`/.well-known/did.json`, the PDS's own DID document.
+
 ## Try it
 
 After `pnpm db:migrate && pnpm dev`:
