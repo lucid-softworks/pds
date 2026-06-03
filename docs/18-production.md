@@ -95,8 +95,15 @@ the PDS. Two options:
    to be reachable on `theirdomain.com`. This is how high-end accounts
    typically work (`pfrazee.com`, `bsky.app` itself, etc.).
 
-For the teaching port we punt: handles use reserved TLDs like `.test` that
-won't ever DNS-resolve. Real production picks one of the above.
+For the teaching port we punt on serving handles under our own domain:
+dev handles use the `.test` TLD which won't DNS-resolve. But we do
+implement **resolution of *other* people's handles** —
+`com.atproto.identity.resolveHandle` falls through to
+`src/pds/did/handle_resolver.ts`, which races a `_atproto.<handle>` DNS
+TXT lookup and a `https://<handle>/.well-known/atproto-did` HTTPS fetch,
+then does the bidirectional check against the resolved DID document's
+`alsoKnownAs`. That means clients can ask this PDS to resolve any
+handle on the network, not just the ones it hosts.
 
 ## PLC: directory or self-hosted
 

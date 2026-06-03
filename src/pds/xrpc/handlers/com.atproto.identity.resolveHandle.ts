@@ -2,17 +2,12 @@
 //
 // Lexicon: https://github.com/bluesky-social/atproto/blob/main/lexicons/com/atproto/identity/resolveHandle.json
 //
-// Map a handle → DID by looking it up in the local accounts table. The
-// upstream PDS also walks DNS TXT (`_atproto.<handle>`) and HTTPS
-// (`.well-known/atproto-did`) to resolve handles whose authoritative PDS
-// isn't us; we defer that to a later chapter on cross-PDS identity.
-//
-// Gap: even with `PDS_LOCAL_PLC=false` and the external DID resolver in
-// place, this endpoint still only handles *local* handles. A complete
-// implementation would race `_atproto.<handle>` DNS TXT lookups (via
-// DNS-over-HTTPS in a Node-friendly way) and a `.well-known/atproto-did`
-// HTTPS fetch, then verify the returned DID's doc lists the handle in
-// `alsoKnownAs`. Out of scope for this session — see chapter 17.
+// Map a handle → DID. Tries the local accounts table first (cheap), then
+// falls back to the cross-PDS resolver in `~/pds/did/handle_resolver`,
+// which races DNS TXT (`_atproto.<handle>`) and HTTPS
+// (`https://<handle>/.well-known/atproto-did`). The cross-PDS path also
+// runs the bidirectional check against the resolved DID's document so a
+// domain can't unilaterally claim someone else's DID.
 //
 // The "not found" error returns HTTP 400 (not 404) because that's what the
 // lexicon defines — see the `errors` array in the JSON schema.
@@ -21,6 +16,7 @@ import type { Handler, HandlerDef } from '../server'
 import { BadRequest } from '../errors'
 import { isValidHandleSyntax } from '~/pds/did/handle'
 import { resolveLocalHandle } from '~/pds/did/resolver'
+import { resolveHandleExternal } from '~/pds/did/handle_resolver'
 
 const handler: Handler = async ({ params }) => {
   const handle = params.handle?.trim().toLowerCase()
@@ -30,11 +26,13 @@ const handler: Handler = async ({ params }) => {
   if (!isValidHandleSyntax(handle)) {
     throw BadRequest(`invalid handle: ${handle}`, 'InvalidRequest')
   }
-  const did = await resolveLocalHandle(handle)
-  if (!did) {
-    throw BadRequest(`unable to resolve handle: ${handle}`, 'NotFound')
-  }
-  return { did }
+  const local = await resolveLocalHandle(handle)
+  if (local) return { did: local }
+
+  const external = await resolveHandleExternal(handle)
+  if (external) return { did: external }
+
+  throw BadRequest(`unable to resolve handle: ${handle}`, 'NotFound')
 }
 
 export const def: HandlerDef = { method: 'GET', handler }
