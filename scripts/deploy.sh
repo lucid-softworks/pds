@@ -276,7 +276,10 @@ ${DOMAIN}, ${ADMIN_HANDLE} {
 CADDY
 
 systemctl daemon-reload
-systemctl enable --now pds
+systemctl enable pds
+# `restart` covers both first-boot (was stopped → start) and re-runs
+# (already running → pick up the freshly-built dist/start.mjs).
+systemctl restart pds
 systemctl restart caddy
 
 ufw allow OpenSSH >/dev/null
