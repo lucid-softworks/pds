@@ -196,7 +196,10 @@ export async function rotatePlc(input: RotateInput): Promise<RotateResult> {
   }
 }
 
-async function loadLatestPlcOp(did: string): Promise<{
+/** Load the most recent PLC op for `did`. Exported because the
+ *  `signPlcOperation` XRPC handler needs to forward unchanged fields from
+ *  the latest op into a caller-supplied rotate op. */
+export async function loadLatestPlcOp(did: string): Promise<{
   cid: string
   seq: number
   op: SignedPlcOp

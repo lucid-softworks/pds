@@ -349,6 +349,21 @@ padding). That's short enough to read aloud from an email, long enough
 that guessing is infeasible. Issuing a fresh token wipes any prior live
 token for the same (did, purpose) — only the newest is valid.
 
+The full set of `EmailPurpose` values today is:
+
+| Purpose | TTL | Used by |
+|---|---|---|
+| `confirm-email` | 24 h | `requestEmailConfirmation` → `confirmEmail` |
+| `update-email` | 24 h | `requestEmailUpdate` → `updateEmail` |
+| `reset-password` | 1 h | `requestPasswordReset` → `resetPassword` |
+| `delete-account` | 1 h | `requestAccountDelete` → `deleteAccount` |
+| `plc-operation-signature` | 15 min | `requestPlcOperationSignature` → `signPlcOperation` (chapter 20) |
+
+The shorter TTLs (password reset, account deletion, PLC ops) correspond
+to higher-value flows. A leaked PLC-signature token in an inbox is an
+identity-takeover door — keeping the window at 15 minutes is the
+narrowest band that still leaves time for inbox latency.
+
 ## Email updates
 
 Changing an account's email address is the same machinery with a twist:

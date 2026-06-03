@@ -29,6 +29,12 @@ export type RefreshClaims = JWTPayload & {
 const ACCESS_TTL_SECONDS = 2 * 60 * 60 // 2 hours
 const REFRESH_TTL_SECONDS = 60 * 24 * 60 * 60 // 60 days
 const SERVICE_TTL_SECONDS = 60 // cross-PDS auth — keep this tight
+// Hard cap when the caller opts into `unsafeLongLived`. Migration is the
+// only flow that needs more than 60s (the user has to drive the
+// destination side end-to-end with the token in hand); one hour is
+// generous and still narrow enough that a leaked token has a short blast
+// radius. Chapter 20.
+const SERVICE_TTL_SECONDS_LONG = 60 * 60 // 1 hour
 
 export async function signAccessToken(did: string): Promise<{
   jwt: string
@@ -97,11 +103,20 @@ export async function signServiceToken(args: {
   aud: string
   lxm?: string
   expiresInSeconds?: number
+  /** Opt-in: allow TTLs above the 60s default, capped at one hour. Only
+   *  the migration entry point (`com.atproto.server.requestAccountMigrate`)
+   *  uses this — the migrating user needs to carry the token across to
+   *  the destination PDS and drive a multi-step ingest. Everything else
+   *  on this PDS sticks to the short default. */
+  unsafeLongLived?: boolean
 }): Promise<{ jwt: string; jti: string; exp: number }> {
   const cfg = getConfig()
+  const cap = args.unsafeLongLived
+    ? SERVICE_TTL_SECONDS_LONG
+    : SERVICE_TTL_SECONDS
   const ttl = Math.min(
     Math.max(1, args.expiresInSeconds ?? SERVICE_TTL_SECONDS),
-    SERVICE_TTL_SECONDS,
+    cap,
   )
   const jti = randomJti()
   const iat = Math.floor(Date.now() / 1000)

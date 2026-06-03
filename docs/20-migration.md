@@ -17,12 +17,21 @@ This PDS speaks both halves of the migration protocol. Source side:
 
 - `com.atproto.sync.getRepo` — chapter 08 shipped this. It hands out a
   CAR of the full repository.
-- `com.atproto.server.getServiceAuth` — new in this chapter. Mints a
-  short-lived JWT the destination PDS can present when it pulls the repo.
-- `com.atproto.server.activateAccount` — chapter 12. The flip-side mark
-  ("I'm done over here, you take over") is a one-line follow-up; the
-  current flow is the destination calling activate, not the source
-  calling deactivate. We'll come back to that gap.
+- `com.atproto.server.getServiceAuth` — mints a short-lived JWT the
+  destination PDS can present when it pulls the repo. 60-second cap;
+  used for one-shot fetches.
+- `com.atproto.server.requestAccountMigrate` — *new* in this wave. The
+  user's "I'm leaving" handshake. Flips `migration_state` to
+  `'migrating-out'`, mints a *one-hour* service token the user carries
+  to the destination PDS to authorise the full ingest, and emits an
+  `#account { active: false }` so subscribers stop accepting writes.
+- `com.atproto.identity.requestPlcOperationSignature` +
+  `com.atproto.identity.signPlcOperation` — *new* in this wave. The
+  user-facing path for self-custody PLC ops. Together they let the user
+  drive a key/service rotation that updateHandle can't express on its
+  own — which is exactly what migration needs (swap the signing key to
+  the destination's reserved one, swap the service endpoint to the
+  destination's URL).
 
 Destination side:
 
@@ -54,32 +63,40 @@ Imagine Alice on the old PDS (`source.example`) is moving to the new PDS
 her client follows:
 
 1. **Log in to the old PDS.** Standard session, nothing migration-specific.
-2. **Reserve a signing key on the new PDS.**
+2. **Ask the old PDS for its leaving handshake.**
+   `POST /xrpc/com.atproto.server.requestAccountMigrate { "to": "https://dest.example" }`.
+   The old PDS fetches `https://dest.example/.well-known/did.json` to
+   pin the destination's service DID, flips
+   `accounts.migration_state` to `'migrating-out'`, emits
+   `#account { active: false, status: 'deactivated' }` on the
+   firehose, and returns `{ token, destination }` where `token` is a
+   one-hour service JWT scoped to the destination DID. Alice carries
+   the token to the new PDS.
+3. **Reserve a signing key on the new PDS.**
    `POST /xrpc/com.atproto.server.reserveSigningKey { "did": "did:plc:alice..." }`.
    The new PDS generates a fresh k256 keypair, stores the private half in
    `reserved_keys`, and returns the Multikey-encoded public half:
    `{ "signingKey": "z6Mk..." }`.
-3. **Build a PLC rotate op locally.** The new op keeps Alice's rotation
-   key (she still controls her identity) but swaps:
-   - `verificationMethods.atproto` → the new signing key from step 2.
-   - `services.atproto_pds.endpoint` → `https://dest.example`.
-
-   The rotate op references the previous op's CID as its `prev`, so
-   plc.directory can verify it chains correctly.
-
-4. **Publish the rotate op.** In production, POST it to plc.directory and
-   the global view updates. In our local-PLC mode, append it to
-   `plc_operations` on whichever side the client decides — this is one
-   of the gaps below; we don't sync the local PLC log between PDSes.
-
-5. **Mint a service token on the old PDS.**
-   `GET /xrpc/com.atproto.server.getServiceAuth?aud=did:web:dest.example&lxm=com.atproto.sync.getRepo`.
-   The old PDS returns a JWT whose `iss` is Alice's DID, `aud` is the
-   destination service, `lxm` scopes it to one method, and `exp` caps at
-   60 seconds. The token lets the destination present *Alice's authority*
-   to the source when it pulls.
+4. **Mint the PLC-signature email token on the old PDS.**
+   `POST /xrpc/com.atproto.identity.requestPlcOperationSignature` (no body).
+   The old PDS emails a 32-character base32 token to the address on
+   file. The 15-minute TTL is the lower bound for "trust the user has
+   physical access to that inbox" — the email round-trip is the slow
+   path that distinguishes a PLC op from an ordinary handle change.
+5. **Sign the rotate op on the old PDS.**
+   `POST /xrpc/com.atproto.identity.signPlcOperation` with
+   `{ token, verificationMethods: { atproto: "did:key:<reserved>" },
+   services: { atproto_pds: { type: "AtprotoPersonalDataServer",
+   endpoint: "https://dest.example" } } }`. The old PDS consumes the
+   token, loads the previous PLC op for forwarding-untouched-fields,
+   signs the new op with Alice's server-held rotation key, appends it
+   to `plc_operations`, publishes upstream (no-op in local mode),
+   emits `#identity`, and returns `{ operation: <signedOp> }`. The
+   signed op carries `prev`-pointing back at the genesis (or whichever
+   op was most recent) and is what plc.directory now serves as Alice's
+   DID document.
 6. **Create the destination account.** `POST /xrpc/com.atproto.server.createAccount`
-   with Alice's existing DID and the signed plcOp from step 3. The
+   with Alice's existing DID and the signed plcOp from step 5. The
    destination validates the op (the `atproto` verification method must
    match the key we just reserved; the service endpoint must match our
    `publicUrl`; the handle in `alsoKnownAs[0]` must match the request),
@@ -88,8 +105,11 @@ her client follows:
    row with `status='deactivated'` and `migration_state='migrating-in'`,
    and hands back a session.
 7. **Download the source repo as a CAR.** `GET /xrpc/com.atproto.sync.getRepo?did=...`,
-   carrying the service token from step 5 as `Authorization: Bearer ...`.
-   The response is a CAR of every block reachable from the current commit.
+   carrying the token from step 2 as `Authorization: Bearer ...`. The
+   response is a CAR of every block reachable from the current commit.
+   (The one-hour TTL is what lets the same token cover both this
+   getRepo and the listMissingBlobs / getBlob loop below; the 60-second
+   `getServiceAuth` token would have to be re-minted before each call.)
 8. **Import the CAR into the destination.** `POST /xrpc/com.atproto.repo.importRepo`
    with the CAR as the binary body and the new account's session as auth.
    The destination verifies the commit signature against the reserved
@@ -97,16 +117,20 @@ her client follows:
    indexes, and emits a `#commit` firehose event.
 9. **Reconcile blobs.** `GET /xrpc/com.atproto.sync.listMissingBlobs`. For
    each `{ cid, recordUri }` it returns, Alice's client downloads the
-   blob from the source PDS (`com.atproto.sync.getBlob`) and uploads it
-   to the destination (`com.atproto.repo.uploadBlob`). Loop until the
-   list is empty (paginate with `cursor`).
+   blob from the source PDS (`com.atproto.sync.getBlob`, presenting the
+   step-2 token) and uploads it to the destination
+   (`com.atproto.repo.uploadBlob`). Loop until the list is empty
+   (paginate with `cursor`).
 10. **Activate.** `POST /xrpc/com.atproto.server.activateAccount` on the
     destination. The account flips from `deactivated` to `active`; the
     firehose announces `#account { active: true }`.
 
-That's the protocol. Two new POSTs (`reserveSigningKey`, `importRepo`),
-two new GETs (`getServiceAuth`, `listMissingBlobs`), all the existing
-read paths, and one rotate op against the PLC.
+That's the protocol. Three new POSTs that landed in this wave
+(`requestAccountMigrate`, `requestPlcOperationSignature`,
+`signPlcOperation`) plus the destination-side bundle from earlier
+(`reserveSigningKey`, `importRepo`, `listMissingBlobs`), the existing
+read paths, and one rotate op against the PLC — signed by *this* PDS
+because the rotation key never leaves the server.
 
 ## The signing key handoff
 
@@ -158,9 +182,141 @@ the firehose surface "this is a migration commit, treat every op as a
 re-binding, not a new write." We don't emit that label yet; the column
 is groundwork.
 
-## The four new endpoints
+## Source-side: `requestAccountMigrate`
 
-### `com.atproto.server.getServiceAuth`
+Code: `src/pds/xrpc/handlers/com.atproto.server.requestAccountMigrate.ts`.
+
+POST, requires `transition:generic` (the broad write scope). Input:
+`{ to: string }` — the destination PDS's *public URL*, not its DID.
+The handler does the resolution.
+
+The handler's path is short:
+
+1. **Validate `to`** as a parseable URL. HTTPS is required unless this
+   PDS itself runs on localhost (the dev policy carried over from
+   `createAccount`'s endpoint check).
+2. **Fetch `<to>/.well-known/did.json`** and pluck out the
+   `AtprotoPersonalDataServer` service entry. The destination's
+   self-described `id` (a `did:web:...` typically) is what we put in
+   the token's `aud`. Any malformed doc — no `service` array, no
+   AtprotoPersonalDataServer entry, non-JSON response, network failure
+   — surfaces as `BadDestination` (400). The user is asking us to
+   migrate to a host that doesn't speak the protocol.
+3. **Flip `accounts.migration_state` to `'migrating-out'`.** Status
+   stays whatever it was; the user can still log in, fetch their repo,
+   etc. The firehose marker is what tells the *world* that writes from
+   this DID should stop being trusted.
+4. **Mint a one-hour service token.** `signServiceToken` normally caps
+   at 60s; we pass the explicit `unsafeLongLived: true` opt-in to
+   stretch to 60 minutes. `lxm` is intentionally absent — the
+   destination uses this single token for `sync.getRepo` *plus* the
+   `sync.getBlob` / `sync.listMissingBlobs` reconciliation loop, so
+   pinning it to one method would force a re-mint every step.
+5. **Emit `#account { active: false, status: 'deactivated' }`.** Best-effort:
+   a sequencer outage shouldn't unwind the migration_state flip. The
+   consumer recovers on its next reconnect.
+
+Output:
+
+```ts
+{
+  token: string,              // 1-hour service JWT; aud = destination.did
+  destination: {
+    did: string,              // from did.json#id
+    endpoint: string,         // from the AtprotoPersonalDataServer entry
+  }
+}
+```
+
+> ⚠️ The 60-second cap on `signServiceToken` exists for a reason — a
+> leaked service token has its full TTL of blast radius. The
+> `unsafeLongLived` opt-in is named that way to keep the trade-off
+> visible. The migration flow needs it because the destination drives a
+> multi-step ingest (getRepo, then loop over getBlob); minting fresh
+> 60-second tokens after each call would require keeping a session live
+> on the source PDS for the whole migration, which is exactly the
+> property the user is trying to give up.
+
+The `migration_state` flip is durable. We don't have a callback for
+"the destination is done"; the source stays in `'migrating-out'` until
+an operator runs the (not-yet-built) `accountMigrated` admin action.
+That's the next gap to close — there's a future chapter about
+operator-driven account lifecycle that owns it.
+
+## Self-custody PLC ops: `requestPlcOperationSignature` + `signPlcOperation`
+
+Code: `src/pds/xrpc/handlers/com.atproto.identity.requestPlcOperationSignature.ts`
+and `com.atproto.identity.signPlcOperation.ts`.
+
+The two-step "user-driven PLC op" surface. Together they unlock the
+*signing key rotation* and *service endpoint change* listed in
+chapter 04 as future rotation kinds — `updateHandle` can only flip
+`alsoKnownAs`, but a real migration has to flip
+`verificationMethods.atproto` and `services.atproto_pds.endpoint`
+simultaneously.
+
+### `requestPlcOperationSignature`
+
+POST, `transition:generic`, no input. Issues an `email_tokens` row with
+purpose `'plc-operation-signature'` and a 15-minute TTL, then emails
+the token to the address on file. Returns `{}`.
+
+Why an email round-trip when the user already has a session? Because
+the op the token unlocks rewrites the DID document — *every* field,
+including the rotation keyset itself. We want a slow, traceable proof
+that the request came from the human who controls the inbox, not just
+the session. 15 minutes is enough for inbox latency and tight enough
+that a compromised session has a narrow window to exploit a token
+they didn't expect.
+
+### `signPlcOperation`
+
+POST, `transition:generic`. Input:
+
+```ts
+{
+  token: string,                          // from requestPlcOperationSignature
+  rotationKeys?: string[],                // optional override
+  alsoKnownAs?: string[],                 // ditto
+  verificationMethods?: Record<string,string>,
+  services?: Record<string, {type: string, endpoint: string}>,
+}
+```
+
+Any field that's omitted is carried forward from the latest op — the
+same overlay-on-latest pattern `rotatePlc` uses for handle changes,
+generalised to expose every field of `UnsignedPlcOp`. The handler:
+
+1. **Consumes the email token.** `consumeEmailToken` throws
+   `Unauthorized InvalidToken` on miss; the lexicon's documented error.
+2. **Loads the latest PLC op** (newly-exported `loadLatestPlcOp`).
+3. **Overlays caller fields** on the latest op's fields. `prev` is
+   always the latest op's CID.
+4. **Signs with the user's server-held rotation key.** The signing
+   algorithm is the same secp256k1 / DAG-CBOR pipeline as
+   `buildGenesisPlc` and `rotatePlc`.
+5. **Persists at `seq = previous + 1`** in `plc_operations`.
+6. **Publishes upstream.** No-op in local-PLC mode; in production this
+   POSTs to plc.directory and the new doc becomes globally visible.
+7. **If `alsoKnownAs` changed**, atomically updates `accounts.handle`
+   to match `alsoKnownAs[0]` (without the `at://` prefix).
+8. **Emits `#identity`** so firehose consumers re-resolve.
+
+Output: `{ operation: <signedOp> }` — the same DAG-CBOR JSON the user
+would otherwise carry off to plc.directory themselves.
+
+> ⚠️ **Upstream divergence: rotation-key safety check.** The reference
+> Bluesky PDS refuses to sign an op that drops *its own* rotation key
+> out of `rotationKeys` — doing so would lock the PDS out of
+> authorising any future rotation. We **log a warning** but don't
+> refuse, because migration intentionally walks that edge: when Alice
+> moves to a new PDS, the rotation key stays with her (or with the new
+> PDS), not the old one. A hard refusal would block the very flow this
+> chapter unlocks. The tightening to a *conditional* refusal — accept
+> the drop only when accompanied by a `migrating-out` migration_state
+> flip — is a follow-up.
+
+
 
 Code: `src/pds/xrpc/handlers/com.atproto.server.getServiceAuth.ts`.
 
@@ -376,34 +532,57 @@ plc.directory verification at the same point.
 
 ## The gaps
 
-This chapter ships four endpoints, the destination-side `createAccount`
-branch, the schema groundwork, and the firehose hook. It deliberately
-leaves two things unsolved.
+This wave promotes `signPlcOperation` + `requestPlcOperationSignature`
+out of stub state, adds `requestAccountMigrate`, and extends the
+choreography to cover the source side end-to-end. Three gaps remain.
 
 ### 1. PLC rotation is local-only
 
-The choreography's step 4 says "publish the rotate op." In our local-PLC
-mode, that means appending to `plc_operations`. But `plc_operations`
-exists *per PDS*. If Alice's old PDS has her log and the new PDS
-appends a rotate op locally, the two PDSes disagree about her DID
-document — the firehose consumers attached to each side see different
-verificationMethods.
+The choreography says "publish the rotate op." In our local-PLC mode
+`signPlcOperation` appends to `plc_operations` and `publishPlcOp` is a
+no-op. But `plc_operations` exists *per PDS*. If Alice's old PDS has
+her log and the new PDS appends a separate rotate op locally, the two
+PDSes disagree about her DID document — the firehose consumers
+attached to each side see different verificationMethods.
 
 In production this works because there's one global plc.directory and
 both PDSes write to it. In local-PLC mode the gap is "no shared log."
-Fixing it means flipping `PDS_LOCAL_PLC=false` and pointing at the real
-directory; chapter 18 covers the env switch. The local-only PLC was
-always a dev shortcut; migration is the workload that exposes its limit.
+Fixing it means flipping `PDS_LOCAL_PLC=false` and pointing at the
+real directory; chapter 18 covers the env switch. The local-only PLC
+was always a dev shortcut; migration is the workload that exposes its
+limit.
 
-### 2. `getServiceAuth` uses HS256 instead of ES256K
+### 2. Service tokens use HS256 instead of ES256K
 
-Covered above. The shape of the token is right; the signing algorithm
-isn't. The receiver of an HS256 token has to share the secret with the
-issuer, which works when the source and destination are the same PDS
-(useful for testing) and breaks across the network. The fix is one
-helper that signs with the user's k256 signing key, plus a
-matching verifier in the middleware that resolves the issuer's DID
-document and verifies against the listed `verificationMethod[#atproto]`.
+Both `getServiceAuth` (60-second tokens) and `requestAccountMigrate`
+(one-hour tokens) sign with HS256 against the shared `PDS_JWT_SECRET`.
+The shape (iss/aud/lxm/exp) is correct; the algorithm isn't. The
+receiver of an HS256 token has to share the secret with the issuer,
+which works when source and destination are the same PDS (useful for
+testing) and breaks across the network. The fix is one helper that
+signs with the user's k256 signing key, plus a matching verifier in
+the middleware that resolves the issuer's DID document and verifies
+against the listed `verificationMethod[#atproto]`.
+
+### 3. No `accountMigrated` cleanup on the source
+
+After `requestAccountMigrate` runs, `migration_state` stays
+`'migrating-out'` forever — there's no callback from the destination
+saying "we have the repo, you can stop holding it." A future
+`accountMigrated` admin action would mark the source row as
+`migrated-out` (or simply tombstone it), free the disk, and emit a
+final `#tombstone` so firehose consumers can drop the DID from their
+indexes. We don't ship it here; the moderation-adjacent chapter that
+owns operator-driven account lifecycle is the natural home.
+
+### 4. `signPlcOperation` doesn't refuse self-eviction
+
+The handler logs a warning but accepts an op that drops this PDS's
+rotation key out of `rotationKeys`. The reference Bluesky PDS refuses
+outright. Tightening to a *conditional* refusal — accept the drop only
+when `migration_state = 'migrating-out'` — keeps the migration flow
+working while restoring the safety property for everyone else. Listed
+as an exercise below.
 
 ## Failure recovery
 
@@ -440,104 +619,78 @@ same PDS. (In a real two-PDS setup the handle would stay the same; we
 rename here because both accounts share one `accounts` table and the
 handle column is unique.)
 
-The choreography normally lives in the user's client. We'll script it
-inline with `pnpm tsx`. Save the helper below as `/tmp/migrate.ts`:
-
-```ts
-// /tmp/migrate.ts — one-shot client for the migrating-in choreography.
-import { db } from '~/lib/db'
-import { accounts, plcOperations } from '~/lib/db/schema'
-import { decode, encode } from '~/pds/codec'
-import { signBytes } from '~/pds/repo/keys'
-import { eq, desc } from 'drizzle-orm'
-
-const [, , aliceDid, newHandle, reservedKeyMultibase] = process.argv
-if (!aliceDid || !newHandle || !reservedKeyMultibase) {
-  console.error('usage: migrate.ts <aliceDid> <newHandle> <reservedKey>')
-  process.exit(1)
-}
-
-// 1. Pull Alice's rotation key + previous op out of Postgres. In a real
-//    migration the rotation key lives in the user's wallet; we cheat here
-//    because the fresh-account path generated it for us.
-const [acc] = await db
-  .select({ rotationKeyPriv: accounts.rotationKeyPriv })
-  .from(accounts)
-  .where(eq(accounts.did, aliceDid))
-  .limit(1)
-if (!acc) throw new Error('account not found')
-
-const [prevOp] = await db
-  .select({ cid: plcOperations.cid })
-  .from(plcOperations)
-  .where(eq(plcOperations.did, aliceDid))
-  .orderBy(desc(plcOperations.seq))
-  .limit(1)
-if (!prevOp) throw new Error('no prior PLC op')
-
-// 2. Re-derive Alice's *current* rotation did:key so we can echo it back.
-const prevBytes = (
-  await db
-    .select({ op: plcOperations.operation })
-    .from(plcOperations)
-    .where(eq(plcOperations.did, aliceDid))
-    .orderBy(desc(plcOperations.seq))
-    .limit(1)
-)[0]!.op
-const prev = await decode<{ rotationKeys: string[] }>(prevBytes)
-
-// 3. Build + sign the rotate op.
-const unsigned = {
-  type: 'plc_operation' as const,
-  rotationKeys: prev.rotationKeys,
-  verificationMethods: { atproto: 'did:key:' + reservedKeyMultibase },
-  alsoKnownAs: [`at://${newHandle}`],
-  services: {
-    atproto_pds: {
-      type: 'AtprotoPersonalDataServer',
-      endpoint: 'http://localhost:3000',
-    },
-  },
-  prev: prevOp.cid,
-}
-const block = await encode(unsigned)
-const sig = signBytes(acc.rotationKeyPriv, block.bytes)
-const b64 = Buffer.from(sig)
-  .toString('base64')
-  .replace(/\+/g, '-')
-  .replace(/\//g, '_')
-  .replace(/=+$/, '')
-console.log(JSON.stringify({ ...unsigned, sig: b64 }))
-```
-
-Then drive the flow:
+Every step below is a real XRPC call — no fixture helpers, no
+poking at the database from a script. The only place we cheat is
+step 5, where we read the PLC-signature email token out of
+`email_tokens` instead of waiting for SMTP; the dev `sendEmail`
+already logs it to the console, but reading the DB keeps the script
+self-contained.
 
 ```bash
-# 0. Log in as Alice, grab a service token, snapshot her DID.
+# 0. Log in as Alice and snapshot her DID.
 ALICE_JWT=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createSession \
   -H 'content-type: application/json' \
   -d '{"identifier":"alice.test","password":"correcthorsebatterystaple"}' \
   | jq -r .accessJwt)
 ALICE_DID=$(curl -s http://localhost:3000/xrpc/com.atproto.server.getSession \
   -H "Authorization: Bearer $ALICE_JWT" | jq -r .did)
-SERVICE_TOKEN=$(curl -s \
-  "http://localhost:3000/xrpc/com.atproto.server.getServiceAuth?aud=did:web:localhost&lxm=com.atproto.sync.getRepo" \
-  -H "Authorization: Bearer $ALICE_JWT" | jq -r .token)
 
-# 1. Reserve a signing key on the destination for Alice's DID.
+# 1. (Source) Ask the old PDS for the leaving handshake. Returns a
+#    one-hour service token + the destination's service DID/endpoint.
+MIGRATE=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.requestAccountMigrate \
+  -H 'content-type: application/json' \
+  -H "Authorization: Bearer $ALICE_JWT" \
+  -d '{"to": "http://localhost:3000"}')
+SERVICE_TOKEN=$(echo "$MIGRATE" | jq -r .token)
+DEST_DID=$(echo "$MIGRATE" | jq -r .destination.did)
+
+# 2. (Destination) Reserve a signing key on the new PDS for Alice's DID.
 RESERVED_KEY=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.reserveSigningKey \
   -H 'content-type: application/json' \
   -d "{\"did\":\"$ALICE_DID\"}" | jq -r .signingKey)
 
-# 2. Build + sign the PLC rotate op with the helper.
-PLC_OP=$(pnpm --silent tsx /tmp/migrate.ts "$ALICE_DID" alice-moved.test "$RESERVED_KEY")
+# 3. (Source) Ask for a PLC-signature token. The token will be in the
+#    server's stdout via the dev sendEmail; we read it from the DB.
+curl -s -X POST http://localhost:3000/xrpc/com.atproto.identity.requestPlcOperationSignature \
+  -H "Authorization: Bearer $ALICE_JWT"
+PLC_TOKEN=$(pnpm --silent tsx -e "
+  import('~/lib/db').then(async ({ db }) => {
+    const { emailTokens } = await import('~/lib/db/schema')
+    const { and, eq } = await import('drizzle-orm')
+    const r = await db.select().from(emailTokens).where(and(
+      eq(emailTokens.did, '$ALICE_DID'),
+      eq(emailTokens.purpose, 'plc-operation-signature'),
+    ))
+    process.stdout.write(r[0].token)
+  })
+")
 
-# 3. Download Alice's repo from the "source".
+# 4. (Source) Sign the rotate op on the old PDS. The new
+#    verificationMethods.atproto points at the reserved key; the new
+#    services.atproto_pds.endpoint points at the destination URL. The
+#    handle changes too (one-process workaround for the unique-handle
+#    constraint). The handler signs with Alice's server-held rotation
+#    key, appends to plc_operations, emits #identity, and returns the
+#    signed op.
+SIGNED=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.identity.signPlcOperation \
+  -H 'content-type: application/json' \
+  -H "Authorization: Bearer $ALICE_JWT" \
+  -d "{
+    \"token\": \"$PLC_TOKEN\",
+    \"alsoKnownAs\": [\"at://alice-moved.test\"],
+    \"verificationMethods\": {\"atproto\": \"did:key:$RESERVED_KEY\"},
+    \"services\": {\"atproto_pds\": {\"type\":\"AtprotoPersonalDataServer\",\"endpoint\":\"http://localhost:3000\"}}
+  }")
+PLC_OP=$(echo "$SIGNED" | jq -c .operation)
+
+# 5. (Source) Download Alice's repo using the migration service token.
 curl -s "http://localhost:3000/xrpc/com.atproto.sync.getRepo?did=$ALICE_DID" \
   -H "Authorization: Bearer $SERVICE_TOKEN" -o /tmp/alice.car
 
-# 4. Tear down Alice's source row so the destination INSERT can land
-#    (one-process limitation: the DID is a primary key).
+# 6. (Source) One-process workaround: drop the source account row so the
+#    destination INSERT can land. In a real two-PDS setup the source
+#    row would persist with migration_state='migrating-out' until the
+#    operator-driven accountMigrated action cleans it up (gap 3).
 pnpm --silent tsx -e "
   import('~/lib/db').then(async ({ db }) => {
     const { accounts } = await import('~/lib/db/schema')
@@ -546,7 +699,8 @@ pnpm --silent tsx -e "
   })
 "
 
-# 5. Create the destination account with Alice's DID + signed op.
+# 7. (Destination) Create the destination account with Alice's DID +
+#    signed op.
 DEST=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createAccount \
   -H 'content-type: application/json' \
   -d "{
@@ -558,35 +712,39 @@ DEST=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createAccou
   }")
 DEST_JWT=$(echo "$DEST" | jq -r .accessJwt)
 
-# 6. Import the CAR.
+# 8. (Destination) Import the CAR.
 curl -s -X POST http://localhost:3000/xrpc/com.atproto.repo.importRepo \
   -H "Authorization: Bearer $DEST_JWT" \
   -H 'content-type: application/vnd.ipld.car' \
   --data-binary @/tmp/alice.car
 
-# 7. Listed missing blobs (empty for the simple case).
+# 9. (Destination) Listed missing blobs (empty for the simple case).
 curl -s http://localhost:3000/xrpc/com.atproto.sync.listMissingBlobs \
   -H "Authorization: Bearer $DEST_JWT" | jq
 
-# 8. Activate.
+# 10. (Destination) Activate.
 curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.activateAccount \
   -H "Authorization: Bearer $DEST_JWT"
 ```
 
-After step 8, `accounts.status` is `active` and `migration_state`
+After step 10, `accounts.status` is `active` and `migration_state`
 remains `migrating-in` so downstream consumers know this account
 landed via migration rather than fresh signup. The firehose has
-emitted, in order: `#identity`, `#account { active: false,
-status: 'deactivated' }`, `#commit` (the imported tree), and
+emitted, in order: `#identity` (from `signPlcOperation`),
+`#account { active: false, status: 'deactivated' }` (from
+`requestAccountMigrate`), `#identity` again (from the destination's
+createAccount), `#account { active: false, status: 'deactivated' }`
+(destination side), `#commit` (the imported tree), and finally
 `#account { active: true }`.
 
-> 📖 **One-process shortcuts.** Step 4 deletes the source row because
-> our DB collapses the two-PDS topology to one table. In a real
-> migration the source PDS keeps the row and later flips its
-> `migration_state` to `migrating-out` (gap 3 in the original list).
-> Step 2 pulls the rotation key out of Postgres because the
-> fresh-account flow generated it server-side; in a real migration the
-> rotation key lives in the user's client and never leaves it.
+> 📖 **One-process shortcuts.** Step 6 deletes the source row because
+> our DB collapses the two-PDS topology to one table; in real life the
+> row would stick around under `migration_state='migrating-out'`. The
+> rotation key signing in step 4 is what *would* normally happen on a
+> client that holds the rotation key offline — we keep it server-side
+> because that's the property the fresh-account flow chose. A future
+> chapter on hardware-backed rotation keys would move this step
+> off-server entirely.
 
 ## Exercises
 
@@ -602,12 +760,19 @@ status: 'deactivated' }`, `#commit` (the imported tree), and
    the fix that uses a composite `(blob_cid, record_uri)` cursor without
    changing the response shape.
 
-3. Sketch the source-side `requestAccountMigrate` endpoint that
-   complements the destination's `importRepo`. It needs to mark
-   `migration_state = 'migrating-out'`, emit some firehose event the
-   consumers can use to drop their local index of the account, and
-   accept proof that the destination has actually received the repo
-   (what's the proof?). Where does it sit in the choreography above?
+3. Tighten `signPlcOperation`'s "do we still hold a rotation key after
+   this op?" check from a log line to a conditional refusal: accept the
+   removal only when `accounts.migration_state = 'migrating-out'`,
+   otherwise throw `InvalidRequest InvalidRotationKey`. Which test
+   needs updating, and what's the order between the `migration_state`
+   read and the email-token consume? (Hint: a token shouldn't be burned
+   on a request the handler was always going to refuse.)
+
+4. Design the `accountMigrated` admin endpoint that closes gap 3.
+   Inputs (which DID, what proof the migration completed?), state
+   transitions (`migrating-out` → ?), firehose events (`#tombstone`?
+   `#account { status: 'deleted' }`?), and what disk it should be free
+   to delete (`repo_blocks`, `blobs`, `plc_operations`?).
 
 ← [19 — Moderation](./19-moderation.md) ·
 [Table of contents](./README.md)

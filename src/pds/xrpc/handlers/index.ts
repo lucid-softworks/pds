@@ -62,6 +62,7 @@ import * as getServiceAuth from './com.atproto.server.getServiceAuth'
 import * as reserveSigningKey from './com.atproto.server.reserveSigningKey'
 import * as importRepo from './com.atproto.repo.importRepo'
 import * as listMissingBlobs from './com.atproto.sync.listMissingBlobs'
+import * as requestAccountMigrate from './com.atproto.server.requestAccountMigrate'
 // admin
 import * as adminGetAccountInfo from './com.atproto.admin.getAccountInfo'
 import * as adminGetAccountInfos from './com.atproto.admin.getAccountInfos'
@@ -120,6 +121,7 @@ export const registry = new HandlerRegistry()
   .register(reserveSigningKey.nsid, reserveSigningKey.def)
   .register(importRepo.nsid, importRepo.def)
   .register(listMissingBlobs.nsid, listMissingBlobs.def)
+  .register(requestAccountMigrate.nsid, requestAccountMigrate.def)
   .register(adminGetAccountInfo.nsid, adminGetAccountInfo.def)
   .register(adminGetAccountInfos.nsid, adminGetAccountInfos.def)
   .register(adminUpdateAccountStatus.nsid, adminUpdateAccountStatus.def)

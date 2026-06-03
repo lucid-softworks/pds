@@ -19,6 +19,11 @@ export type EmailPurpose =
   | 'update-email'
   | 'reset-password'
   | 'delete-account'
+  // Self-custody PLC ops. The user already has a session; we still gate the
+  // signing call on an email round-trip because the op rewrites the DID
+  // document (signing key, service endpoint, even the rotation keyset
+  // itself) and we want a slow, traceable proof of intent. Chapter 20.
+  | 'plc-operation-signature'
 
 const DEFAULT_TTL_SECONDS: Record<EmailPurpose, number> = {
   'confirm-email': 60 * 60 * 24,
@@ -29,6 +34,10 @@ const DEFAULT_TTL_SECONDS: Record<EmailPurpose, number> = {
   // Account deletion is irreversible; keep the window tight, same reasoning
   // as reset-password.
   'delete-account': 60 * 60,
+  // PLC signing happens immediately after the user receives the token — the
+  // client pastes it back into `signPlcOperation` on the same call. 15 mins
+  // is enough for inbox latency and not much more.
+  'plc-operation-signature': 60 * 15,
 }
 
 export async function issueEmailToken(args: {

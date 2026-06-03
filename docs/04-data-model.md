@@ -276,6 +276,15 @@ Future rotation kinds use the exact same machinery:
   alongside the PDS-held one, so the user can recover the account even if
   the PDS is unreachable.
 
+The user-facing surface for the second two — and any future rotation
+that touches a field other than the handle — is
+`com.atproto.identity.signPlcOperation` (chapter 20). It accepts an
+arbitrary subset of `(rotationKeys, alsoKnownAs, verificationMethods,
+services)` overlaid on the latest op, gated by an email-confirmation
+token issued by `requestPlcOperationSignature`. `updateHandle` stays
+the narrow fast-path for "just rename me"; `signPlcOperation` is the
+escape hatch for everything else.
+
 The DID itself never changes. It was derived from the SHA-256 hash of the
 *genesis* op's bytes, and rotations append rather than replace — they can't
 retroactively change history because every op points back at its predecessor
