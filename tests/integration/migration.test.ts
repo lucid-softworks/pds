@@ -37,7 +37,7 @@ import {
   expect,
   it,
 } from 'vitest'
-import { jwtVerify } from 'jose'
+import { importJWK, jwtVerify } from 'jose'
 import { db } from '~/lib/db'
 import {
   accounts,
@@ -48,7 +48,6 @@ import { decode } from '~/pds/codec'
 import { createAccount } from '~/pds/account/create'
 import { dispatch } from '~/pds/xrpc/server'
 import { registry } from '~/pds/xrpc/handlers'
-import { getConfig } from '~/lib/config'
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null
 
@@ -317,13 +316,17 @@ describe('source-side: requestAccountMigrate', () => {
       .where(eq(accounts.did, did))
     expect(acct[0]!.migrationState).toBe('migrating-out')
 
-    // The token verifies with our shared HS256 secret (we are both the
-    // issuer for this self-issued token *and* the resource server in
-    // single-process mode). aud is the destination's service DID; the
-    // user is the issuer; the exp sits inside the 1-hour window.
-    const { payload } = await jwtVerify(out.token, getConfig().jwtSecret)
-    expect(payload.iss).toBe(did)
-    expect(payload.aud).toBe(DEST_OK_DID)
+    // The token is ES256K-signed with the migrating user's repo key —
+    // exactly what the destination PDS would verify against the user's
+    // DID document (atproto's standard cross-service auth). Reconstruct
+    // the public JWK from the stored signing key + verify.
+    const { jwt: pubJwk } = await callerPublicJwk(did)
+    const pubKey = await importJWK(pubJwk, 'ES256K')
+    const { payload, protectedHeader } = await jwtVerify(out.token, pubKey, {
+      issuer: did,
+      audience: DEST_OK_DID,
+    })
+    expect(protectedHeader.alg).toBe('ES256K')
     const ttl = (payload.exp as number) - Math.floor(Date.now() / 1000)
     // Anything between ~50 minutes and exactly an hour is fine — the cap
     // is 3600s and the request was made in this test second.
@@ -351,3 +354,43 @@ describe('source-side: requestAccountMigrate', () => {
     expect(res.status).toBe(401)
   })
 })
+
+/** Reconstruct the public JWK for an account's signing key. Used by tests
+ *  that verify the ES256K-signed tokens our PDS mints on behalf of the
+ *  user. Mirrors the helper in tests/integration/proxy.test.ts. */
+async function callerPublicJwk(did: string): Promise<{
+  jwt: {
+    kty: 'EC'
+    crv: 'secp256k1'
+    x: string
+    y: string
+    alg: 'ES256K'
+    use: 'sig'
+  }
+}> {
+  const { getKeyWrapper } = await import('~/pds/auth/key_wrap')
+  const { secp256k1 } = await import('@noble/curves/secp256k1')
+  const row = (
+    await db
+      .select({ signingKeyPriv: accounts.signingKeyPriv })
+      .from(accounts)
+      .where(eq(accounts.did, did))
+      .limit(1)
+  )[0]
+  if (!row) throw new Error(`no account row for ${did}`)
+  const privHex = await getKeyWrapper().unwrap(row.signingKeyPriv)
+  const privBytes = new Uint8Array(
+    privHex.match(/.{2}/g)!.map((b) => Number.parseInt(b, 16)),
+  )
+  const pub = secp256k1.getPublicKey(privBytes, false)
+  return {
+    jwt: {
+      kty: 'EC',
+      crv: 'secp256k1',
+      x: Buffer.from(pub.slice(1, 33)).toString('base64url'),
+      y: Buffer.from(pub.slice(33, 65)).toString('base64url'),
+      alg: 'ES256K',
+      use: 'sig',
+    },
+  }
+}

@@ -28,15 +28,12 @@
 // See chapter 17 — PDS vs AppView vs Relay.
 
 import { eq } from 'drizzle-orm'
-import { SignJWT, importJWK, type KeyLike } from 'jose'
-import { Buffer } from 'node:buffer'
-import { randomBytes } from 'node:crypto'
-import { secp256k1 } from '@noble/curves/secp256k1'
 
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { resolveDid } from '~/pds/did/resolver'
 import { getKeyWrapper } from '~/pds/auth/key_wrap'
+import { mintServiceAuthWithKey } from '~/pds/auth/service_auth'
 import { BadRequest, NotFound, InternalError, Unauthorized } from './errors'
 
 /** Headers we strip when forwarding upstream. `host`, `connection`,
@@ -69,8 +66,6 @@ const UPSTREAM_HOP_BY_HOP = new Set([
   'content-length',
   'content-encoding', // upstream may have gzipped; we re-encode on the way out
 ])
-
-const SERVICE_AUTH_TTL_SECONDS = 60
 
 /** Parse `Atproto-Proxy: did:web:api.bsky.app#bsky_appview`. The fragment
  *  is required — it identifies *which* service on the target DID we want
@@ -108,29 +103,6 @@ export async function resolveProxyEndpoint(
   return null
 }
 
-/** Mint a one-shot service-auth JWT, signed ES256K with the user's repo
- *  signing key. The receiver verifies against the public key in the
- *  user's DID document (the same key that signs commits), so this is the
- *  canonical cross-service authentication primitive in atproto. */
-export async function mintProxyServiceAuth(args: {
-  requesterDid: string
-  signingKeyPriv: string // hex k256 scalar (plaintext, already unwrapped)
-  audience: string
-  lxm: string
-}): Promise<string> {
-  const key = await importSigningKey(args.signingKeyPriv)
-  const iat = Math.floor(Date.now() / 1000)
-  const exp = iat + SERVICE_AUTH_TTL_SECONDS
-  const jti = randomBytes(16).toString('base64url')
-  return await new SignJWT({ lxm: args.lxm })
-    .setProtectedHeader({ alg: 'ES256K', typ: 'JWT' })
-    .setIssuer(args.requesterDid)
-    .setAudience(args.audience)
-    .setIssuedAt(iat)
-    .setExpirationTime(exp)
-    .setJti(jti)
-    .sign(key)
-}
 
 /** Forward the in-flight request to `upstreamUrl` with the service-auth
  *  bearer, preserving body + safe headers, and return the upstream's
@@ -234,8 +206,8 @@ export async function dispatchViaProxy(args: {
     throw InternalError(`failed to unwrap signing key: ${(err as Error).message}`)
   }
 
-  const serviceAuth = await mintProxyServiceAuth({
-    requesterDid: args.callerDid,
+  const { jwt: serviceAuth } = await mintServiceAuthWithKey({
+    did: args.callerDid,
     signingKeyPriv,
     audience: target.did,
     lxm: args.nsid,
@@ -253,32 +225,4 @@ export async function dispatchViaProxy(args: {
     request: args.request,
     serviceAuth,
   })
-}
-
-/** Convert a 32-byte hex k256 scalar into a jose-usable `KeyLike` for
- *  ES256K signing. Mirrors the pattern in src/pds/oauth/tokens.ts. */
-async function importSigningKey(privateKeyHex: string): Promise<KeyLike> {
-  const privBytes = decodeHex(privateKeyHex)
-  const pub = secp256k1.getPublicKey(privBytes, false)
-  const x = pub.slice(1, 33)
-  const y = pub.slice(33, 65)
-  const jwk = {
-    kty: 'EC',
-    crv: 'secp256k1',
-    x: Buffer.from(x).toString('base64url'),
-    y: Buffer.from(y).toString('base64url'),
-    d: Buffer.from(privBytes).toString('base64url'),
-    alg: 'ES256K',
-    use: 'sig',
-  }
-  return (await importJWK(jwk, 'ES256K')) as KeyLike
-}
-
-function decodeHex(hex: string): Uint8Array {
-  if (hex.length % 2 !== 0) throw new Error('odd-length hex string')
-  const out = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < out.length; i++) {
-    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)
-  }
-  return out
 }

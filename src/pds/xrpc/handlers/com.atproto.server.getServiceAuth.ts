@@ -2,22 +2,26 @@
 //
 // Lexicon: https://github.com/bluesky-social/atproto/blob/main/lexicons/com/atproto/server/getServiceAuth.json
 //
-// Mint a short-lived service token from the user's session. The migrating
-// user calls this on their old PDS to get a token authorizing the new PDS to
-// call `getRepo` on their behalf. Also a future hook for AppView proxy auth.
+// Mint a short-lived service token from the user's session. Used for
+// every "I'm <user>, please do <thing> on my behalf" cross-service
+// hop — the migrating user calls this to get a token authorising the
+// destination PDS, bsky.app calls it to get a token to address the
+// AppView for non-proxied endpoints (e.g. age assurance), labelers /
+// chat services receive these too.
 //
-// The token's `iss` is the user DID, `aud` is the target service, and `lxm`
-// (optional) scopes it to a single lexicon method. Lifetime caps at 60s.
+// The token's `iss` is the user DID, `aud` is the target service, and
+// `lxm` (optional) scopes it to a single lexicon method. Lifetime
+// caps at 60s.
 //
-// ⚠️ See chapter 20: real interop wants ES256K signatures the receiver can
-// verify against the user's DID document. We sign with HS256 against the
-// shared PDS secret — fine when source and destination are the same PDS,
-// not useful across the network.
+// Signed ES256K with the user's repo signing key — the same key
+// published in the DID document — so the receiver can verify against
+// the user's `verificationMethod[#atproto]` without any shared
+// secret. See `~/pds/auth/service_auth.ts`.
 
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest } from '../errors'
 import { requireAuthWithScope } from '~/pds/auth/middleware'
-import { signServiceToken } from '~/pds/auth/jwt'
+import { mintServiceAuth } from '~/pds/auth/service_auth'
 
 const MAX_TTL_SECONDS = 60
 const NSID_RE = /^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+(\.[a-zA-Z][a-zA-Z0-9]*)$/
@@ -53,9 +57,9 @@ const handler: Handler = async ({ params, authorization, dpopProof, request }) =
     ttl = Math.min(requested, MAX_TTL_SECONDS)
   }
 
-  const { jwt } = await signServiceToken({
+  const { jwt } = await mintServiceAuth({
     did: me.did,
-    aud,
+    audience: aud,
     ...(lxm ? { lxm } : {}),
     expiresInSeconds: ttl,
   })

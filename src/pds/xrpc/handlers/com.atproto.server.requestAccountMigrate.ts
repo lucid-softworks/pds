@@ -23,7 +23,7 @@ import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { getConfig } from '~/lib/config'
 import { requireAuthWithScope } from '~/pds/auth/middleware'
-import { signServiceToken } from '~/pds/auth/jwt'
+import { mintServiceAuth } from '~/pds/auth/service_auth'
 import { emitAccount } from '~/pds/sequencer/sequence'
 
 const InputSchema = z.object({
@@ -101,9 +101,9 @@ const handler: Handler = async ({ input, authorization, dpopProof, request }) =>
   // listMissingBlobs (potentially more). The 60s default cap is replaced
   // by the long-lived branch — this is the only flow today that asks
   // for it.
-  const { jwt } = await signServiceToken({
+  const { jwt } = await mintServiceAuth({
     did: me.did,
-    aud: destination.did,
+    audience: destination.did,
     expiresInSeconds: MIGRATION_TTL_SECONDS,
     unsafeLongLived: true,
   })

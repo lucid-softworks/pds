@@ -11,7 +11,6 @@ import { getConfig } from '~/lib/config'
 import {
   signAccessToken,
   signRefreshToken,
-  signServiceToken,
   verifyAccessToken,
   verifyRefreshToken,
 } from './jwt'
@@ -70,23 +69,5 @@ describe('expired tokens', () => {
   })
 })
 
-describe('signServiceToken', () => {
-  it('round-trips with the right aud / lxm', async () => {
-    const { jwt } = await signServiceToken({
-      did: DID,
-      aud: 'did:web:other.example',
-      lxm: 'com.atproto.sync.getRepo',
-    })
-    // We don't have a public verifyServiceToken; decode the payload to check
-    // the claims using `jose` directly. Re-using verifyAccessToken would
-    // reject because iss != serviceDid.
-    const claims = JSON.parse(
-      Buffer.from(jwt.split('.')[1]!, 'base64url').toString('utf8'),
-    )
-    expect(claims.iss).toBe(DID)
-    expect(claims.aud).toBe('did:web:other.example')
-    expect(claims.lxm).toBe('com.atproto.sync.getRepo')
-    // Service tokens are capped at 60 seconds by the implementation.
-    expect(claims.exp - claims.iat).toBeLessThanOrEqual(60)
-  })
-})
+// Service-auth coverage lives in src/pds/auth/service_auth.test.ts because
+// the new (ES256K, key-from-DB) implementation lives outside this file.
