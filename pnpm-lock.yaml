@@ -111,6 +111,9 @@ importers:
       drizzle-kit:
         specifier: ^0.30.1
         version: 0.30.6
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.0
       prettier:
         specifier: ^3.4.2
         version: 3.8.3
