@@ -24,6 +24,12 @@ export type PdsConfig = {
   /** When true, createAccount rejects without a valid `inviteCode`. Default
    *  false (open signup). See chapter 12 — Invite codes. */
   inviteRequired: boolean
+  /** Hex-encoded 32-byte k256 private scalar used to sign OAuth tokens
+   *  (access + refresh) and as the JWK published at /oauth/jwks. Separate
+   *  from per-account repo keys: the PDS-as-issuer signs with this, the
+   *  PDS-as-repo-host signs commits with the account's own key. NULL when
+   *  the OAuth surface is disabled. See chapter 21 — OAuth. */
+  oauthSigningKey: string | null
 }
 
 let cached: PdsConfig | null = null
@@ -48,6 +54,7 @@ export function getConfig(): PdsConfig {
   // `pnpm admin:hash <password>` and pastes the result. The plaintext fallback
   // exists for quick local poking and is documented as such in chapter 19.
   const adminPasswordHash = resolveAdminPasswordHash()
+  const oauthSigningKey = resolveOauthSigningKey()
   cached = {
     publicUrl: publicUrl.replace(/\/$/, ''),
     hostname,
@@ -58,8 +65,21 @@ export function getConfig(): PdsConfig {
     blobStoreDir: required('BLOB_DIR', './.blobs'),
     adminPasswordHash,
     inviteRequired: process.env.PDS_INVITE_REQUIRED === 'true',
+    oauthSigningKey,
   }
   return cached
+}
+
+function resolveOauthSigningKey(): string | null {
+  const hex = process.env.PDS_OAUTH_SIGNING_KEY
+  if (!hex || hex.length === 0) return null
+  if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length !== 64) {
+    throw new Error(
+      'PDS_OAUTH_SIGNING_KEY must be a 32-byte hex string (64 hex chars). ' +
+        "Generate with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    )
+  }
+  return hex.toLowerCase()
 }
 
 function resolveAdminPasswordHash(): string | null {

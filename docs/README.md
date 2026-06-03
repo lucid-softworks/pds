@@ -44,6 +44,10 @@ and *why* the design is what it is.
 - [19 — Moderation](./19-moderation.md)
 - [20 — Migration](./20-migration.md)
 
+## Part VII — OAuth
+
+- [21 — OAuth](./21-oauth.md)
+
 ---
 
 ## Reading order
@@ -59,7 +63,7 @@ Chapters build on each other. If you skip around, the dependency graph is:
                                        ↓
                                        12 → 13 → 14 → 15
                                                         ↓
-                                                        16 → 17 → 18 → 19 → 20
+                                                        16 → 17 → 18 → 19 → 20 → 21
 ```
 
 The hardest cluster is 06–08 (MST, commits, CAR). If you're stuck there, keep

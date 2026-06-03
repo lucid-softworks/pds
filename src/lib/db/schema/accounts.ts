@@ -105,7 +105,14 @@ export const repoBlocks = pgTable(
 // `jti` claim so we can revoke individual tokens without invalidating every
 // session. The row is deleted on logout or rotation.
 //
-// See chapter 13 — Authentication.
+// The same table backs two flavours of refresh token:
+// - `kind = 'session'` (the default) — chapter-13 password sessions. The
+//   OAuth-only fields (`dpopJkt`, `scope`) stay NULL.
+// - `kind = 'oauth'` — chapter-21 OAuth refresh tokens. DPoP-bound, so the
+//   client key thumbprint is pinned in `dpopJkt`, and the granted OAuth
+//   scope string is stored alongside.
+//
+// See chapter 13 — Authentication, and chapter 21 — OAuth.
 export const refreshTokens = pgTable(
   'refresh_tokens',
   {
@@ -118,6 +125,14 @@ export const refreshTokens = pgTable(
       .defaultNow()
       .notNull(),
     appPasswordName: text('app_password_name'),
+    // 'session' (legacy password flow, chapter 13) or 'oauth' (chapter 21).
+    kind: text('kind').default('session').notNull(),
+    // RFC 7638 JWK thumbprint of the DPoP key the token is bound to. Set
+    // for kind='oauth', NULL otherwise.
+    dpopJkt: text('dpop_jkt'),
+    // OAuth scope string, e.g. 'atproto transition:generic'. Set for
+    // kind='oauth', NULL otherwise.
+    scope: text('scope'),
   },
   (t) => ({
     didIdx: index('refresh_tokens_did_idx').on(t.did),

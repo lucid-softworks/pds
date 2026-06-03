@@ -146,3 +146,19 @@ export async function verifyRefreshToken(token: string): Promise<RefreshClaims> 
 function randomJti(): string {
   return randomBytes(16).toString('base64url')
 }
+
+// ─── OAuth tokens ──────────────────────────────────────────────────────────
+//
+// The OAuth surface (chapter 21) mints its own access + refresh JWTs signed
+// with the PDS's OAuth signing key (ES256K, asymmetric — public half is on
+// /oauth/jwks). They live in `~/pds/oauth/tokens` so the chapter-21 code is
+// self-contained; we re-export the signer here so callers have a single
+// place to look for "how do I mint a token for a session?"
+//
+// See chapter 21 — OAuth.
+export {
+  signOauthAccessToken,
+  signOauthRefreshToken,
+  consumeOauthRefreshToken,
+  verifyOauthAccessToken,
+} from '~/pds/oauth/tokens'

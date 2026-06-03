@@ -12,6 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DocsIndexRouteImport } from './routes/docs/index'
 import { Route as XrpcNsidRouteImport } from './routes/xrpc/$nsid'
+import { Route as OauthTokenRouteImport } from './routes/oauth/token'
+import { Route as OauthRevokeRouteImport } from './routes/oauth/revoke'
+import { Route as OauthParRouteImport } from './routes/oauth/par'
+import { Route as OauthJwksRouteImport } from './routes/oauth/jwks'
+import { Route as OauthAuthorizeRouteImport } from './routes/oauth/authorize'
 import { Route as DocsSlugRouteImport } from './routes/docs/$slug'
 
 const IndexRoute = IndexRouteImport.update({
@@ -29,6 +34,31 @@ const XrpcNsidRoute = XrpcNsidRouteImport.update({
   path: '/xrpc/$nsid',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OauthTokenRoute = OauthTokenRouteImport.update({
+  id: '/oauth/token',
+  path: '/oauth/token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OauthRevokeRoute = OauthRevokeRouteImport.update({
+  id: '/oauth/revoke',
+  path: '/oauth/revoke',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OauthParRoute = OauthParRouteImport.update({
+  id: '/oauth/par',
+  path: '/oauth/par',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OauthJwksRoute = OauthJwksRouteImport.update({
+  id: '/oauth/jwks',
+  path: '/oauth/jwks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OauthAuthorizeRoute = OauthAuthorizeRouteImport.update({
+  id: '/oauth/authorize',
+  path: '/oauth/authorize',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DocsSlugRoute = DocsSlugRouteImport.update({
   id: '/docs/$slug',
   path: '/docs/$slug',
@@ -38,12 +68,22 @@ const DocsSlugRoute = DocsSlugRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
+  '/oauth/jwks': typeof OauthJwksRoute
+  '/oauth/par': typeof OauthParRoute
+  '/oauth/revoke': typeof OauthRevokeRoute
+  '/oauth/token': typeof OauthTokenRoute
   '/xrpc/$nsid': typeof XrpcNsidRoute
   '/docs/': typeof DocsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
+  '/oauth/jwks': typeof OauthJwksRoute
+  '/oauth/par': typeof OauthParRoute
+  '/oauth/revoke': typeof OauthRevokeRoute
+  '/oauth/token': typeof OauthTokenRoute
   '/xrpc/$nsid': typeof XrpcNsidRoute
   '/docs': typeof DocsIndexRoute
 }
@@ -51,20 +91,58 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
+  '/oauth/jwks': typeof OauthJwksRoute
+  '/oauth/par': typeof OauthParRoute
+  '/oauth/revoke': typeof OauthRevokeRoute
+  '/oauth/token': typeof OauthTokenRoute
   '/xrpc/$nsid': typeof XrpcNsidRoute
   '/docs/': typeof DocsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/docs/$slug' | '/xrpc/$nsid' | '/docs/'
+  fullPaths:
+    | '/'
+    | '/docs/$slug'
+    | '/oauth/authorize'
+    | '/oauth/jwks'
+    | '/oauth/par'
+    | '/oauth/revoke'
+    | '/oauth/token'
+    | '/xrpc/$nsid'
+    | '/docs/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/docs/$slug' | '/xrpc/$nsid' | '/docs'
-  id: '__root__' | '/' | '/docs/$slug' | '/xrpc/$nsid' | '/docs/'
+  to:
+    | '/'
+    | '/docs/$slug'
+    | '/oauth/authorize'
+    | '/oauth/jwks'
+    | '/oauth/par'
+    | '/oauth/revoke'
+    | '/oauth/token'
+    | '/xrpc/$nsid'
+    | '/docs'
+  id:
+    | '__root__'
+    | '/'
+    | '/docs/$slug'
+    | '/oauth/authorize'
+    | '/oauth/jwks'
+    | '/oauth/par'
+    | '/oauth/revoke'
+    | '/oauth/token'
+    | '/xrpc/$nsid'
+    | '/docs/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DocsSlugRoute: typeof DocsSlugRoute
+  OauthAuthorizeRoute: typeof OauthAuthorizeRoute
+  OauthJwksRoute: typeof OauthJwksRoute
+  OauthParRoute: typeof OauthParRoute
+  OauthRevokeRoute: typeof OauthRevokeRoute
+  OauthTokenRoute: typeof OauthTokenRoute
   XrpcNsidRoute: typeof XrpcNsidRoute
   DocsIndexRoute: typeof DocsIndexRoute
 }
@@ -92,6 +170,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof XrpcNsidRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/oauth/token': {
+      id: '/oauth/token'
+      path: '/oauth/token'
+      fullPath: '/oauth/token'
+      preLoaderRoute: typeof OauthTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/oauth/revoke': {
+      id: '/oauth/revoke'
+      path: '/oauth/revoke'
+      fullPath: '/oauth/revoke'
+      preLoaderRoute: typeof OauthRevokeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/oauth/par': {
+      id: '/oauth/par'
+      path: '/oauth/par'
+      fullPath: '/oauth/par'
+      preLoaderRoute: typeof OauthParRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/oauth/jwks': {
+      id: '/oauth/jwks'
+      path: '/oauth/jwks'
+      fullPath: '/oauth/jwks'
+      preLoaderRoute: typeof OauthJwksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/oauth/authorize': {
+      id: '/oauth/authorize'
+      path: '/oauth/authorize'
+      fullPath: '/oauth/authorize'
+      preLoaderRoute: typeof OauthAuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/docs/$slug': {
       id: '/docs/$slug'
       path: '/docs/$slug'
@@ -105,6 +218,11 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DocsSlugRoute: DocsSlugRoute,
+  OauthAuthorizeRoute: OauthAuthorizeRoute,
+  OauthJwksRoute: OauthJwksRoute,
+  OauthParRoute: OauthParRoute,
+  OauthRevokeRoute: OauthRevokeRoute,
+  OauthTokenRoute: OauthTokenRoute,
   XrpcNsidRoute: XrpcNsidRoute,
   DocsIndexRoute: DocsIndexRoute,
 }

@@ -321,8 +321,12 @@ this implementation deliberately left untouched:
 
 - **OAuth.** The protocol is migrating from password-based sessions to a
   full OAuth flow. The shape is in
-  [the OAuth spec](https://atproto.com/specs/oauth); the implementation
-  is a chapter of its own.
+  [the OAuth spec](https://atproto.com/specs/oauth);
+  [chapter 21](./21-oauth.md) implements the back half (metadata, JWKS,
+  token endpoint, revocation, DPoP). The browser-facing pieces
+  (`/oauth/authorize`, `/oauth/par`, consent UI, client metadata
+  validation, PKCE) are deferred to a follow-on session, with stubs in
+  place and gaps flagged in the chapter itself.
 - **Account migration.** The cross-PDS handoff that lets a user pick up
   their DID and repo and move hosts. Implemented in
   [chapter 20](./20-migration.md) — the four new endpoints, the schema
