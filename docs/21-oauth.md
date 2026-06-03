@@ -80,15 +80,11 @@ refresh pair, then keep rotating that pair via the `refresh_token` grant.
 The integration test at `tests/integration/oauth-front-half.test.ts`
 exercises exactly that path.
 
-One piece remains on the roadmap, 🚧:
-
-- **Shared DPoP replay store.** The in-process `jti` cache works for
-  single-process deploys but a multi-process PDS shares nothing. A Redis
-  (or pglite-shared-row) cache is a small follow-up.
-
-Everything else in the original 🚧 list shipped, including the
+Everything else from the original 🚧 list has shipped, including the
 resource-server enforcement (`requireOauthAccess` + `requireEitherAuth`,
-covered below in *Plumbing OAuth tokens into XRPC handlers*):
+covered below in *Plumbing OAuth tokens into XRPC handlers*) and the
+pluggable DPoP replay store (covered below in *Plumbing the DPoP
+replay store*):
 
 - ~~`/oauth/authorize` — login + consent UI~~ ✅
 - ~~`/oauth/par` — Pushed Authorization Requests~~ ✅
@@ -147,10 +143,12 @@ verifier in `src/pds/oauth/dpop.ts` is alg-aware and dispatches to
 `@noble/curves`'s secp256k1 or p256 accordingly. Real-world interop > spec
 purity.
 
-> ⚠️ **The replay cache is in-process.** A multi-process deployment shares
-> nothing today — a proof accepted on process A can be replayed against
-> process B within the 60-second window. Production needs the same cache
-> in Redis or a shared store. Flagged on the roadmap.
+> ⚠️ **The default replay store is in-process.** A multi-process
+> deployment doesn't share a `Map`, so a proof accepted on process A
+> can be replayed against process B within the 60-second window. The
+> store is pluggable behind `DpopReplayStore` (see *Plumbing the DPoP
+> replay store* below) — swap in a Redis-backed implementation for
+> multi-replica.
 
 ## The PDS's OAuth signing key
 
@@ -667,12 +665,66 @@ they used DPoP. The `requireAuthWithScope` wrapper composes
 result *without* a scope assertion (none today) can still call
 `requireEitherAuth` directly.
 
-## What's still missing
+## Plumbing the DPoP replay store
 
-🚧 **Production DPoP replay cache.** The in-process cache in
-`src/pds/oauth/dpop.ts` works for a single PDS process. Multi-process
-deploys need a shared cache (Redis) or accept the small replay window
-across processes as a manageable risk.
+`verifyDpopProof` doesn't track `jti` values itself — it delegates to a
+small interface:
+
+```ts
+// src/pds/oauth/dpop_store.ts
+export interface DpopReplayStore {
+  checkAndRecord(jti: string): Promise<{ firstSeen: boolean }>
+  reset?(): Promise<void>
+}
+```
+
+`checkAndRecord` is the atomic primitive: check whether `jti` has been
+seen inside the 60-second window and, if not, record it. A `firstSeen:
+true` result means the proof is fresh and the request continues; a
+`firstSeen: false` result means it's a replay and the verifier throws.
+The window is fixed at ~60s because DPoP proofs themselves expire that
+fast (the `iat` ±60s tolerance, see above) — anything we'd remember
+longer is wasted memory; anything shorter opens a replay gap.
+
+Two backends ship.
+
+**`InMemoryDpopReplayStore`** is the default. It's a `Map<jti,
+expiresAtMs>` with a 16384-entry cap. Every `checkAndRecord` lazily
+sweeps expired entries, then checks the cap and drops the oldest by
+insertion order if a new entry would push us over. Single-process
+deployments — every dev setup and most small self-hosts — are fine on
+this. Cross-process replays aren't a concern because there *is* no
+second process.
+
+**`RedisDpopReplayStore`** is a documented stub. The teaching port's
+"no new deps" rule keeps `ioredis` out of `package.json`, but the
+intended implementation is one Redis primitive away:
+
+```lua
+-- atomic check-and-record, 60s expiry
+if redis.call('SET', KEYS[1], 1, 'NX', 'EX', 60) then
+  return 1  -- firstSeen
+else
+  return 0  -- replay
+end
+```
+
+`SET … NX EX 60` is "set this key to 1 only if it doesn't already
+exist, and expire it in 60 seconds, atomically". The same call returns
+the truthy or falsy answer for `firstSeen`. No second round-trip, no
+race between processes that both saw the same proof — Redis serialises.
+Wire `ioredis` in, replace the stub body with one `SET` call, done.
+
+The selector reads `PDS_DPOP_REPLAY_STORE` (default `'in-memory'`,
+`'redis'` selects the stub) once on first call and caches the result.
+`getDpopReplayStore()` is the only entry point `verifyDpopProof`
+touches; the rest of the OAuth code path is unchanged.
+
+This mirrors the shape the rate-limit store uses (chapter 18 —
+`src/pds/xrpc/rate_limit.ts`). Same two-implementation split, same env
+selector, same "the stub throws with a chapter pointer" convention.
+Once a deployment has a Redis client in scope, both stores can be
+swapped together.
 
 ## Try it
 

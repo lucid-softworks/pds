@@ -34,6 +34,8 @@ import {
 } from 'jose'
 import { randomBytes } from 'node:crypto'
 
+import { getDpopReplayStore, _setDpopReplayStoreForTests } from './dpop_store'
+
 export type DpopVerifyArgs = {
   /** Raw `DPoP:` header value (the compact JWT). */
   dpopHeader: string
@@ -53,46 +55,15 @@ export type DpopVerifyResult = {
 }
 
 const IAT_TOLERANCE_SECONDS = 60
-const REPLAY_WINDOW_MS = 60_000
-const REPLAY_CACHE_LIMIT = 4096
 
-/** Simple LRU-by-insertion-time cache of jti values we've recently accepted.
- *  Old entries are evicted lazily on insert. */
-class JtiCache {
-  private readonly seen = new Map<string, number>()
-
-  has(jti: string, now: number): boolean {
-    const ts = this.seen.get(jti)
-    if (ts === undefined) return false
-    if (now - ts > REPLAY_WINDOW_MS) {
-      this.seen.delete(jti)
-      return false
-    }
-    return true
-  }
-
-  remember(jti: string, now: number): void {
-    // Evict expired + cap size.
-    if (this.seen.size >= REPLAY_CACHE_LIMIT) {
-      for (const [k, ts] of this.seen) {
-        if (now - ts > REPLAY_WINDOW_MS) this.seen.delete(k)
-        if (this.seen.size < REPLAY_CACHE_LIMIT) break
-      }
-      // If we're still at the cap, drop the oldest entry by insertion order.
-      if (this.seen.size >= REPLAY_CACHE_LIMIT) {
-        const oldestKey = this.seen.keys().next().value
-        if (oldestKey !== undefined) this.seen.delete(oldestKey)
-      }
-    }
-    this.seen.set(jti, now)
-  }
-}
-
-const jtiCache = new JtiCache()
-
+/** Reset the process-wide replay store. Tests call this between cases so
+ *  one test's `jti` doesn't leak into the next. Implemented as a re-init
+ *  of the store the selector cached on first use — covers both the
+ *  in-memory and (test-injected) stub backends. */
 export function _resetDpopJtiCache(): void {
-  // For tests — reset state between cases.
-  ;(jtiCache as unknown as { seen: Map<string, number> }).seen.clear()
+  // Swap to a fresh in-memory store. This is the simplest reset that
+  // works whether or not getDpopReplayStore had been called yet.
+  _setDpopReplayStoreForTests(null)
 }
 
 /** Validate a DPoP proof JWT. Throws on any failure with a message safe to
@@ -204,10 +175,10 @@ export async function verifyDpopProof(
   if (typeof jti !== 'string' || jti.length === 0) {
     throw new Error('DPoP jti claim missing')
   }
-  if (jtiCache.has(jti, nowMs)) {
+  const { firstSeen } = await getDpopReplayStore().checkAndRecord(jti)
+  if (!firstSeen) {
     throw new Error('DPoP jti replay detected')
   }
-  jtiCache.remember(jti, nowMs)
 
   const jkt = await calculateJwkThumbprint(jwk, 'sha256')
   if (expectedJkt && expectedJkt !== jkt) {
