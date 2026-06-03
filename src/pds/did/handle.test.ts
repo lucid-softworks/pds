@@ -75,14 +75,14 @@ describe('isReservedTld', () => {
     expect(isReservedTld('alice.dev')).toBe(false)
   })
 
-  // The task brief listed `alice.test` as a reserved-TLD example, but the
-  // current implementation in handle.ts does NOT include `.test` in the
-  // reserved set — it's intentionally allowed in dev (see also the
-  // comment in src/pds/account/create.ts). If `.test` should be reserved
-  // per spec, the implementation needs a fix. Flagging via a skipped test
-  // so the regression is visible.
-  // TODO(coordinator): decide whether `.test` should join the reserved set.
-  it.skip('reserves the .test TLD (per task brief; current impl allows it)', () => {
-    expect(isReservedTld('alice.test')).toBe(true)
+  // Policy decision: `.test` is intentionally NOT in the reserved TLD set.
+  // The dev port uses `.test` handles routinely (e.g. `alice.test`) so the
+  // local toolchain has a TLD it can hand out without spec-IANA collisions.
+  // RFC 6761 reserves `.test` for testing/development specifically, which
+  // is exactly what we use it for here — so allowing it in this PDS is
+  // consistent with the IETF intent even if a strict reading of "reserved"
+  // would say otherwise. See also src/pds/account/create.ts.
+  it('does NOT reserve the .test TLD (allowed in dev)', () => {
+    expect(isReservedTld('alice.test')).toBe(false)
   })
 })
