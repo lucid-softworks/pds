@@ -107,22 +107,43 @@ plc.directory. To federate, you have to flip that:
 PDS_LOCAL_PLC=false
 ```
 
-The handful of places that need wiring:
+The handful of places that need wiring, all of which now ship:
 
-1. **`createLocalPlc` in `src/pds/did/plc.ts`** publishes the signed op
-   to `https://plc.directory/<did>` via POST. The DID is the same hash
-   either way (it's derived from the op's bytes), so existing local DIDs
-   *can* be uploaded after the fact, but it's awkward; better to flip
-   the flag *before* you create any accounts you want federated.
-2. **DID resolution** in `src/pds/did/resolver.ts` for *external* DIDs
-   currently only looks at the local `accounts` table. Add a fallback
-   that fetches `https://plc.directory/<did>` for did:plc and
-   `https://<host>/.well-known/did.json` for did:web. Cache aggressively
-   (TTLs of 5–60 minutes are standard; the document changes rarely).
-3. **Account migration** (`com.atproto.server.requestAccountMigrate` —
-   we haven't implemented it) needs to rotate the PLC op via the user's
-   rotation key. If you stayed in local-PLC mode, those rotation keys
-   exist but nobody else can verify them.
+1. **Genesis publishing.** `src/pds/account/create.ts` (the fresh-account
+   branch) calls `publishPlcOp` between `persistGenesisPlc` and the
+   firehose emit. The op was signed earlier; we POST the JSON form of
+   the *signed* op to `https://plc.directory/<did>`. The DID is the same
+   hash either way (it's derived from the op's bytes), so existing local
+   DIDs *can* be uploaded after the fact by re-publishing — but it's
+   awkward; flip the flag *before* you create accounts you want
+   federated. Migrating-in accounts deliberately skip publishing — the
+   user's previous PDS already registered the DID, and the rotate op
+   they brought authorises the swap.
+2. **Handle-rotation publishing.** `rotatePlc` in `src/pds/did/plc.ts`
+   calls `publishPlcOp` after appending the new op locally. plc.directory
+   ingests the whole chain at the same `/<did>` endpoint.
+3. **External DID resolution.** `src/pds/did/external_resolver.ts`
+   exposes `resolveDid(did)` — it tries the local `accounts` table first
+   (own DIDs short-circuit, no network call), then falls back to
+   `https://plc.directory/<did>` for did:plc and
+   `https://<host>/.well-known/did.json` for did:web. Results cache
+   in-process for 5 minutes; misses negative-cache for 30 seconds so a
+   flood of bad requests doesn't hammer the directory. Most XRPC
+   handlers still call `resolveLocalDid` because they're only ever
+   resolving their own accounts — cross-PDS resolution lands when the
+   sync endpoints need it.
+4. **Account migration** (chapter 20) needs the same rotation-key path
+   to work end-to-end against plc.directory. If you stayed in local-PLC
+   mode while testing migration, the rotation keys exist but nobody else
+   can verify them.
+
+> ⚠️ **Publishing is best-effort with one retry.** `publishPlcOp` retries
+> once on network errors / 5xx with a 250 ms backoff, treats 409 as
+> idempotent success, and surfaces 400 as a hard failure. For
+> high-volume production, wrap account creation in a job queue so a
+> directory outage doesn't break signups — the signed op is already
+> durable in `plc_operations`, so a background worker can replay
+> unpublished ops by re-decoding the bytes.
 
 > 📖 **Running your own PLC mirror** is a serious commitment — the
 > directory's job is to be a globally trusted append-only log, which

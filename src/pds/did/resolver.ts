@@ -3,8 +3,9 @@
 // For our own accounts, build the document from the local `accounts` table.
 // For did:web (the service DID this PDS uses for itself), the document is
 // served from /.well-known/did.json — that file route is built separately.
-// External DID resolution (other PDSes, did:plc on plc.directory) lands in
-// a later chapter.
+// External DID resolution (other PDSes, did:plc on plc.directory) lives in
+// `./external_resolver.ts` and is exposed here for backwards-compatible
+// imports.
 
 import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db'
@@ -36,3 +37,8 @@ export async function resolveLocalHandle(handle: string): Promise<string | null>
     .limit(1)
   return rows[0]?.did ?? null
 }
+
+// Re-export the unified resolver for callers that want fallback to
+// plc.directory / did:web. Most existing call sites only resolve their own
+// DIDs and keep using `resolveLocalDid` — flag-day migration not warranted.
+export { resolveDid, resetResolverCache } from './external_resolver'

@@ -185,10 +185,16 @@ did:plc:g7k4q6y6jmrr3hgpwxs4f5n2
 > directory will store. So if the directory's bytes ever differ from ours,
 > we know — they don't hash to the same DID anymore.
 
-> ⚠️ **Difference from upstream.** Our DIDs aren't published. They're
-> resolvable from this PDS only. A relay would not be able to look them up.
-> Production deployment requires either (a) flipping `PDS_LOCAL_PLC=false`
-> and pointing at plc.directory, or (b) running your own PLC mirror. See
+> ⚠️ **Difference from upstream.** In the default dev mode
+> (`PDS_LOCAL_PLC=true` or unset) our DIDs aren't published; they're
+> resolvable from this PDS only and a relay can't look them up. Setting
+> `PDS_LOCAL_PLC=false` flips the publish step on: `createAccount` POSTs
+> the signed genesis op to `https://plc.directory/<did>` between
+> persisting locally and emitting the firehose event, and `updateHandle`
+> does the same for rotation ops. The remaining caveat is that publishing
+> is single-attempt with one 250 ms retry — a 5xx run during an outage
+> will fail the whole signup and roll back. Production should add a
+> durable job queue that retries the publish off the request path. See
 > chapter 18 — Production.
 
 > 📖 **Migrating accounts.** The flow above generates the keys, signs the

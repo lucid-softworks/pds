@@ -20,6 +20,7 @@ import { decode, encode } from '~/pds/codec'
 import { signBytes } from '~/pds/repo/keys'
 import { db } from '~/lib/db'
 import { plcOperations } from '~/lib/db/schema'
+import { publishPlcOp } from './plc_client'
 
 // Unsigned form. Bluesky's PLC spec uses snake_case in operation field names;
 // the `sig` field is appended after signing.
@@ -183,6 +184,10 @@ export async function rotatePlc(input: RotateInput): Promise<RotateResult> {
     operation: signedBlock.bytes,
     seq: nextSeq,
   })
+
+  // Publish to plc.directory. No-op in local-PLC mode. Same endpoint as the
+  // genesis op — the directory ingests the whole chain at /<did>.
+  await publishPlcOp({ did: input.did, signedOpBytes: signedBlock.bytes })
 
   return {
     cid: signedBlock.cid.toString(),

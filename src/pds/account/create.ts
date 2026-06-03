@@ -36,6 +36,7 @@ import {
   InvalidHandleError,
 } from '~/pds/did/handle'
 import { buildGenesisPlc, persistGenesisPlc } from '~/pds/did/plc'
+import { publishPlcOp } from '~/pds/did/plc_client'
 import { encode } from '~/pds/codec'
 import { hashPassword } from '~/pds/auth/password'
 import { createSessionTokens } from '~/pds/auth/session'
@@ -135,6 +136,10 @@ export async function createAccount(
 
     // ── 6a. Persist the genesis PLC op (FK now satisfied).
     await persistGenesisPlc({ did, signedBlock: plc.signedBlock })
+
+    // ── 6a'. Publish to plc.directory. No-op in local-PLC mode. If this
+    //         throws, the outer catch rolls back the account + plc rows.
+    await publishPlcOp({ did, signedOpBytes: plc.signedOpBytes })
 
     // ── 6b. Consume the invite code ─────────────────────────────────────
     // Done after the account row lands so that the audit log can name a
