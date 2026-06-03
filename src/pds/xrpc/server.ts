@@ -19,6 +19,11 @@ export type HandlerCtx = {
   params: Record<string, string>
   /** Whatever the request's Authorization header claimed, before validation. */
   authorization?: string
+  /** The paired DPoP proof from the `DPoP:` request header, if any. Only
+   *  meaningful for OAuth-scheme requests (`Authorization: DPoP <jwt>`); the
+   *  legacy `Bearer` flow ignores it. Handlers that want to accept either
+   *  scheme call `requireEitherAuth({ authorization, dpopProof, request })`. */
+  dpopProof?: string
   /** The raw Request for handlers that need streaming or headers. */
   request: Request
 }
@@ -90,6 +95,7 @@ export async function dispatch(
       input,
       params,
       authorization: request.headers.get('authorization') ?? undefined,
+      dpopProof: request.headers.get('dpop') ?? undefined,
       request,
     })
 

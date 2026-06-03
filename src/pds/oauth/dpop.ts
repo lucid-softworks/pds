@@ -26,10 +26,13 @@ import { secp256k1 } from '@noble/curves/secp256k1'
 import { p256 } from '@noble/curves/p256'
 import { sha256 } from '@noble/hashes/sha256'
 import {
+  SignJWT,
   calculateJwkThumbprint,
   decodeProtectedHeader,
   type JWK,
+  type KeyLike,
 } from 'jose'
+import { randomBytes } from 'node:crypto'
 
 export type DpopVerifyArgs = {
   /** Raw `DPoP:` header value (the compact JWT). */
@@ -248,4 +251,37 @@ function jwkToUncompressedPub(jwk: JWK): Uint8Array {
   out.set(x, 1)
   out.set(y, 33)
   return out
+}
+
+/** Sign a DPoP proof JWT bound to a single HTTP request.
+ *
+ *  Tests use this to avoid hand-rolling the JWS each time; real OAuth clients
+ *  do the same dance in their own languages. The shape is the minimum spec
+ *  set: `htm`, `htu`, `iat`, `jti`, plus an embedded public JWK in the
+ *  protected header so the verifier can recompute the key thumbprint. */
+export async function signDpopProof(args: {
+  /** The matching public JWK; embedded in the proof's protected header. */
+  publicJwk: JWK
+  /** The client's private key for signing. */
+  privateKey: KeyLike
+  /** JWS alg — must match the curve in `publicJwk` (ES256 / ES256K). */
+  alg: 'ES256' | 'ES256K'
+  /** HTTP method, e.g. 'GET' or 'POST'. */
+  httpMethod: string
+  /** Full request URL (query/fragment stripped at verify time). */
+  httpUri: string
+  /** Override the jti — tests use this to force a replay. */
+  jti?: string
+  /** Override iat — tests use this to simulate clock skew. */
+  iat?: number
+}): Promise<string> {
+  const jti = args.jti ?? randomBytes(8).toString('base64url')
+  const builder = new SignJWT({
+    htm: args.httpMethod.toUpperCase(),
+    htu: args.httpUri,
+    jti,
+  }).setProtectedHeader({ alg: args.alg, typ: 'dpop+jwt', jwk: args.publicJwk })
+  if (args.iat !== undefined) builder.setIssuedAt(args.iat)
+  else builder.setIssuedAt()
+  return builder.sign(args.privateKey)
 }

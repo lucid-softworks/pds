@@ -13,6 +13,8 @@ import { db } from '~/lib/db'
 import { accounts, refreshTokens } from '~/lib/db/schema'
 import { getConfig } from '~/lib/config'
 import { Forbidden, Unauthorized } from '~/pds/xrpc/errors'
+import { verifyDpopProof } from '~/pds/oauth/dpop'
+import { verifyOauthAccessToken } from '~/pds/oauth/tokens'
 import { verifyAccessToken, verifyRefreshToken } from './jwt'
 import { verifyPassword } from './password'
 import { assertAccountActive } from './session'
@@ -42,6 +44,73 @@ export async function requireAccessAuth(
   const token = parseBearer(authorization)
   const claims = await verifyAccess(token)
   return loadAccount(claims.sub, opts)
+}
+
+/** Validate a DPoP-bound OAuth access token and its paired DPoP proof.
+ *
+ *  The caller passes the `Authorization: DPoP <jwt>` value, the `DPoP:` proof
+ *  header, and the live `Request` so we can pull method + URL for the proof's
+ *  `htm` / `htu` binding. We verify the access token (signature + claims),
+ *  then verify the proof with `expectedJkt` set to the token's `cnf.jkt` so
+ *  the proof-of-possession is enforced on this exact request. The returned
+ *  account carries the granted `scope` string from the token. */
+export async function requireOauthAccess(args: {
+  authorization?: string
+  dpopProof?: string
+  request: Request
+  opts?: AuthOptions
+}): Promise<AuthenticatedAccount & { scope: string }> {
+  const token = parseDpop(args.authorization)
+  if (!args.dpopProof || args.dpopProof.trim().length === 0) {
+    throw Unauthorized('DPoP proof header required', 'AuthMissing')
+  }
+  const claims = await verifyOauthAccess(token)
+  try {
+    await verifyDpopProof({
+      dpopHeader: args.dpopProof,
+      httpMethod: args.request.method,
+      httpUri: stripQuery(args.request.url),
+      expectedJkt: claims.jkt,
+    })
+  } catch (err) {
+    // Every DPoP-side failure (signature, htm/htu, iat, replay, jkt mismatch)
+    // maps to InvalidToken — the client presented credentials, they just
+    // don't bind to this request.
+    throw Unauthorized(
+      (err as Error).message || 'DPoP proof invalid',
+      'InvalidToken',
+    )
+  }
+  const account = await loadAccount(claims.did, args.opts)
+  return { ...account, scope: claims.scope }
+}
+
+/** Accept either the legacy `Bearer <session-jwt>` flow or the OAuth
+ *  `DPoP <oauth-jwt>` + `DPoP:` proof pair. The returned account carries a
+ *  `scope` field that's `'session'` for the legacy path or whatever the
+ *  OAuth token granted. Dispatcher-friendly: handlers that want to support
+ *  both schemes call this with the request's headers as-is. */
+export async function requireEitherAuth(args: {
+  authorization?: string
+  dpopProof?: string
+  request: Request
+  opts?: AuthOptions
+}): Promise<AuthenticatedAccount & { scope: string }> {
+  const scheme = detectScheme(args.authorization)
+  if (scheme === 'bearer') {
+    const account = await requireAccessAuth(args.authorization, args.opts)
+    return { ...account, scope: 'session' }
+  }
+  if (scheme === 'dpop') {
+    return requireOauthAccess(args)
+  }
+  if (scheme === 'missing') {
+    throw Unauthorized('authorization header required', 'AuthMissing')
+  }
+  throw Unauthorized(
+    'authorization scheme must be Bearer or DPoP',
+    'InvalidToken',
+  )
 }
 
 /** Validate the Authorization header as HTTP Basic with the configured admin
@@ -133,9 +202,52 @@ function parseBearer(authorization: string | undefined): string {
   return match[1].trim()
 }
 
+function parseDpop(authorization: string | undefined): string {
+  if (!authorization || authorization.trim().length === 0) {
+    throw Unauthorized('authorization header required', 'AuthMissing')
+  }
+  const match = /^dpop\s+(.+)$/i.exec(authorization.trim())
+  if (!match || !match[1]) {
+    throw Unauthorized('authorization scheme must be DPoP', 'InvalidToken')
+  }
+  return match[1].trim()
+}
+
+function detectScheme(
+  authorization: string | undefined,
+): 'bearer' | 'dpop' | 'missing' | 'unknown' {
+  if (!authorization || authorization.trim().length === 0) return 'missing'
+  const lower = authorization.trim().toLowerCase()
+  if (lower.startsWith('bearer ')) return 'bearer'
+  if (lower.startsWith('dpop ')) return 'dpop'
+  return 'unknown'
+}
+
+function stripQuery(url: string): string {
+  // RFC 9449 §4.2: `htu` compares the URI with query + fragment removed. The
+  // verifier normalises both sides anyway, but stripping here keeps the
+  // comparison surface obvious.
+  try {
+    const u = new URL(url)
+    u.search = ''
+    u.hash = ''
+    return u.toString()
+  } catch {
+    return url
+  }
+}
+
 async function verifyAccess(token: string) {
   try {
     return await verifyAccessToken(token)
+  } catch (err) {
+    throw mapJwtError(err)
+  }
+}
+
+async function verifyOauthAccess(token: string) {
+  try {
+    return await verifyOauthAccessToken(token)
   } catch (err) {
     throw mapJwtError(err)
   }

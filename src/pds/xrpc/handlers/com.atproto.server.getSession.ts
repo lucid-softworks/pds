@@ -5,17 +5,24 @@
 // "Who am I?" — returns the caller's account info given an access JWT in the
 // Authorization header. Clients call this on app start to confirm the cached
 // session is still valid.
+//
+// Wave 9B: This handler is the first to accept *both* the legacy session JWT
+// (`Authorization: Bearer <hs256>`) and an OAuth access token bound to a
+// DPoP proof (`Authorization: DPoP <es256k>` + `DPoP: <proof>`). The
+// dispatcher passes the paired DPoP header in `ctx.dpopProof`, and
+// `requireEitherAuth` inspects the Authorization scheme to dispatch. The
+// rest of the body is unchanged — `me.did` is the caller in both cases.
 
 import { eq } from 'drizzle-orm'
 import type { Handler, HandlerDef } from '../server'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireEitherAuth } from '~/pds/auth/middleware'
 import { buildDidDocument } from '~/pds/did/document'
 import { getConfig } from '~/lib/config'
 
-const handler: Handler = async ({ authorization }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ authorization, dpopProof, request }) => {
+  const me = await requireEitherAuth({ authorization, dpopProof, request })
   // Pull signingKeyPub so we can render the DID document.
   const rows = await db
     .select({

@@ -80,17 +80,15 @@ refresh pair, then keep rotating that pair via the `refresh_token` grant.
 The integration test at `tests/integration/oauth-front-half.test.ts`
 exercises exactly that path.
 
-Two pieces remain on the roadmap, both 🚧:
+One piece remains on the roadmap, 🚧:
 
-- **Resource-server enforcement** (`requireOauthAccess`). The OAuth
-  tokens we mint are still unrouted on the XRPC surface — no handler
-  rejects on a bad scope, or accepts an OAuth bearer in place of an
-  HS256 session JWT. Wave 9B handles it.
 - **Shared DPoP replay store.** The in-process `jti` cache works for
   single-process deploys but a multi-process PDS shares nothing. A Redis
   (or pglite-shared-row) cache is a small follow-up.
 
-Everything else in the original 🚧 list shipped:
+Everything else in the original 🚧 list shipped, including the
+resource-server enforcement (`requireOauthAccess` + `requireEitherAuth`,
+covered below in *Plumbing OAuth tokens into XRPC handlers*):
 
 - ~~`/oauth/authorize` — login + consent UI~~ ✅
 - ~~`/oauth/par` — Pushed Authorization Requests~~ ✅
@@ -535,16 +533,83 @@ the thumbprint of the DPoP key you generated; the refresh token is
 already persisted in the `refresh_tokens` table with `kind='oauth'` and
 the same `dpop_jkt`.
 
-## What's still missing
+## Plumbing OAuth tokens into XRPC handlers
 
-🚧 **`requireOauthAccess` middleware.** The chapter-13 middleware in
-`src/pds/auth/middleware.ts` validates HS256 access tokens. The parallel
-`requireOauthAccess` would: verify the bearer token as an OAuth access
-token (ES256K), require a DPoP proof on the same request whose key
-thumbprint matches the token's `cnf.jkt`, and enforce the granted scope
-against the called NSID. Today the OAuth tokens we mint are unrouted —
-no XRPC handler accepts them. Adding the middleware is a follow-on
-session.
+The front half mints tokens; the back half lets clients *use* them.
+Wave 9B closes the loop in `src/pds/auth/middleware.ts`:
+
+```ts
+export async function requireOauthAccess(args: {
+  authorization?: string
+  dpopProof?: string
+  request: Request
+  opts?: AuthOptions
+}): Promise<AuthenticatedAccount & { scope: string }>
+
+export async function requireEitherAuth(args: {
+  authorization?: string
+  dpopProof?: string
+  request: Request
+  opts?: AuthOptions
+}): Promise<AuthenticatedAccount & { scope: string }>
+```
+
+A client paired with an OAuth token sends:
+
+```
+Authorization: DPoP <oauth-access-jwt>
+DPoP: <proof-jwt>
+```
+
+The dispatcher in `src/pds/xrpc/server.ts` carries the paired `DPoP:`
+header alongside the existing `Authorization` header in `HandlerCtx.dpopProof`
+— literally just `request.headers.get('dpop')`. Handlers that opt in call
+`requireEitherAuth({ authorization, dpopProof, request })`, which:
+
+1. **Inspects the scheme.** `Bearer …` delegates to the chapter-13
+   `requireAccessAuth` and tags the result with `scope: 'session'`.
+   `DPoP …` delegates to `requireOauthAccess` and tags the result with
+   the scope claim from the OAuth token. Anything else is an
+   `Unauthorized` `InvalidToken`.
+2. **For DPoP:** strip the prefix, verify the access JWT against our
+   OAuth public key, then verify the proof JWT with `expectedJkt` set to
+   the token's `cnf.jkt`. The proof's `htm` / `htu` must match the live
+   request — that's the proof-of-possession binding. Missing `DPoP:` is
+   `AuthMissing`; jkt mismatch / replay / signature failure is
+   `InvalidToken`.
+3. **Loads the account** by the token's `sub` and applies the same
+   active / deactivated gate the legacy flow uses.
+
+We *don't* migrate every handler. The two schemes are equivalent on
+endpoints that just need "the caller is this DID" — the legacy
+session JWT is still the first-party PDS flow for the official client,
+and migrating fifty handlers wholesale would be a lot of mechanical
+diff for no behaviour change. Instead, handlers opt in case-by-case.
+`com.atproto.server.getSession` is the first to do so: it's the most
+natural OAuth resource (an `at://me` lookup) and a good template for
+the rest. Every other handler still calls `requireAccessAuth` and
+accepts only the legacy scheme — including `com.atproto.repo.createRecord`,
+`updateHandle`, and the admin surface — until they too get migrated.
+
+When you migrate a handler, the change is two lines:
+
+```diff
+- import { requireAccessAuth } from '~/pds/auth/middleware'
++ import { requireEitherAuth } from '~/pds/auth/middleware'
+
+- const handler: Handler = async ({ authorization }) => {
+-   const me = await requireAccessAuth(authorization)
++ const handler: Handler = async ({ authorization, dpopProof, request }) => {
++   const me = await requireEitherAuth({ authorization, dpopProof, request })
+```
+
+The returned `me` carries an additional `scope` field — `'session'` if
+the caller used the legacy flow, or the OAuth token's `scope` claim if
+they used DPoP. Future scope-aware enforcement (rejecting a narrow
+`atproto` token from a `com.atproto.repo.applyWrites` call, say) lives
+in the handler that knows what scope it requires.
+
+## What's still missing
 
 🚧 **Production DPoP replay cache.** The in-process cache in
 `src/pds/oauth/dpop.ts` works for a single PDS process. Multi-process
@@ -609,6 +674,26 @@ Decode the access token (the middle base64url segment) and you'll see
 the `cnf.jkt` claim — that's the thumbprint of the DPoP key you
 generated up front.
 
+Finally, use the access token to call a real XRPC endpoint —
+`getSession` is the first one to accept the DPoP scheme:
+
+```ts
+const getSessionUrl = 'http://localhost:3000/xrpc/com.atproto.server.getSession'
+const getSessionProof = await dpopProof('GET', getSessionUrl)
+const me = await fetch(getSessionUrl, {
+  method: 'GET',
+  headers: {
+    authorization: `DPoP ${access_token}`,
+    dpop: getSessionProof,
+  },
+}).then((r) => r.json())
+console.log(me)
+// → { did, handle, email, emailConfirmed: true, didDoc, active: true }
+```
+
+The proof must be fresh — try the same fetch twice and the second one
+fails with `InvalidToken` because the `jti` is now in the replay cache.
+
 ## Exercises
 
 1. The `/oauth/token` endpoint accepts `scope` on a refresh request and
@@ -622,12 +707,13 @@ generated up front.
    defending against — and what threat is the `iat` ±60s tolerance
    defending against?
 
-3. Sketch the `requireOauthAccess` middleware. It needs to: parse the
-   `Authorization: DPoP <jwt>` header, verify the access token, then
-   verify a DPoP proof on the same request whose key thumbprint matches
-   the token's `cnf.jkt`. Which existing helpers does it compose? Where
-   should it live in the codebase? What error names does it raise
-   (compare chapter 13's `Unauthorized` / `Forbidden` taxonomy)?
+3. Read `requireOauthAccess` in `src/pds/auth/middleware.ts`. It composes
+   `verifyOauthAccessToken` (signature + claims) and `verifyDpopProof`
+   (proof-of-possession on this request). What error names does it
+   raise, and which one fires when (a) the `DPoP:` header is missing,
+   (b) the proof's key thumbprint doesn't match the token's `cnf.jkt`,
+   (c) the proof's `htm` says POST but the request is a GET? Cross-
+   reference the chapter-13 `Unauthorized` / `Forbidden` taxonomy.
 
 ## Up next
 
