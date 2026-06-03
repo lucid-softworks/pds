@@ -59,7 +59,10 @@ const handler: Handler = async ({ input, authorization }) => {
 
   if (!existingCid) {
     // Idempotent no-op. Return the current commit state so clients can chain
-    // calls without inferring "is this a 404 or success?"
+    // calls without inferring "is this a 404 or success?". If the repo row
+    // is missing too (account without a genesis row, edge case), omit the
+    // commit field — the lexicon types it as optional, and emitting empty-
+    // string CIDs would fail strict validation.
     const repoRow = (
       await db
         .select({ rootCid: repos.rootCid, rev: repos.rev })
@@ -67,11 +70,9 @@ const handler: Handler = async ({ input, authorization }) => {
         .where(eq(repos.did, did))
         .limit(1)
     )[0]
-    return {
-      commit: repoRow
-        ? { cid: repoRow.rootCid, rev: repoRow.rev }
-        : { cid: '', rev: '' },
-    }
+    return repoRow
+      ? { commit: { cid: repoRow.rootCid, rev: repoRow.rev } }
+      : {}
   }
 
   const result = await applyWrites({
