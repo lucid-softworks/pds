@@ -48,6 +48,12 @@ export const accounts = pgTable(
     // in a cross-PDS move so the firehose can distinguish a migration commit
     // from an ordinary one. See chapter 20 — Migration.
     migrationState: text('migration_state').default('none').notNull(),
+    // bsky.app client preferences (muted words, content filters, feed
+    // language, pinned feeds, …). Stored as a JSON array of objects each
+    // tagged with `$type`. The PDS doesn't interpret the contents — the
+    // AppView + client do — we just persist whatever putPreferences sends.
+    // See chapter 22 + handlers/app.bsky.actor.{get,put}Preferences.ts.
+    preferences: text('preferences').default('[]').notNull(),
   },
   (t) => ({
     handleIdx: uniqueIndex('accounts_handle_idx').on(t.handle),

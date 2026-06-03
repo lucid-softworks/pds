@@ -110,36 +110,38 @@ export async function dispatch(
     return res
   }
 
-  // PDS-as-proxy: when the client sends `Atproto-Proxy: <did>#<svc>`, we
-  // forward the call upstream (typically the user's AppView / chat /
-  // labeler) signed with a fresh service-auth JWT minted from their repo
-  // signing key. The local handler registry is bypassed — app.bsky.* and
-  // chat.bsky.* never live here. See chapter 17 + src/pds/xrpc/proxy.ts.
-  const proxyHeader = request.headers.get('atproto-proxy')
-  if (proxyHeader) {
-    try {
-      const auth = await requireEitherAuth({
-        authorization: request.headers.get('authorization') ?? undefined,
-        dpopProof: request.headers.get('dpop') ?? undefined,
-        request,
-      })
-      const res = await dispatchViaProxy({
-        nsid,
-        request,
-        callerDid: auth.did,
-      })
-      return respond(res)
-    } catch (err) {
-      if (err instanceof XrpcError) return respond(jsonResponse(err))
-      reqLog.error('xrpc-proxy-failed', {
-        err: { name: (err as Error).name, message: (err as Error).message },
-      })
-      return respond(jsonResponse(InternalError()))
-    }
-  }
-
+  // PDS-as-proxy: when the client sends `Atproto-Proxy: <did>#<svc>` AND
+  // we don't have a local handler for the NSID, forward the call upstream
+  // (typically the user's AppView / chat / labeler) signed with a fresh
+  // service-auth JWT minted from their repo signing key. The header alone
+  // is *not* enough to take the proxy branch — bsky.app sets it on every
+  // request including `com.atproto.*` calls that we should handle locally;
+  // proxying those would round-trip them to the AppView and get a 4xx.
+  // See chapter 17 + src/pds/xrpc/proxy.ts.
   const def = registry.get(nsid)
   if (!def) {
+    const proxyHeader = request.headers.get('atproto-proxy')
+    if (proxyHeader) {
+      try {
+        const auth = await requireEitherAuth({
+          authorization: request.headers.get('authorization') ?? undefined,
+          dpopProof: request.headers.get('dpop') ?? undefined,
+          request,
+        })
+        const res = await dispatchViaProxy({
+          nsid,
+          request,
+          callerDid: auth.did,
+        })
+        return respond(res)
+      } catch (err) {
+        if (err instanceof XrpcError) return respond(jsonResponse(err))
+        reqLog.error('xrpc-proxy-failed', {
+          err: { name: (err as Error).name, message: (err as Error).message },
+        })
+        return respond(jsonResponse(InternalError()))
+      }
+    }
     return respond(
       jsonResponse(NotFound(`unknown XRPC method: ${nsid}`, 'MethodNotImplemented')),
     )
