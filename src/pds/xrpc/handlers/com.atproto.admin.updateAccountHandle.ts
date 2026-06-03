@@ -19,6 +19,7 @@ import { BadRequest, Conflict, NotFound } from '../errors'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { requireAdmin } from '~/pds/auth/middleware'
+import { withAdminAudit } from '~/pds/admin/audit'
 import { assertValidHandle, InvalidHandleError } from '~/pds/did/handle'
 import { emitIdentity } from '~/pds/sequencer/sequence'
 
@@ -27,7 +28,13 @@ const InputSchema = z.object({
   handle: z.string().min(1),
 })
 
-const handler: Handler = async ({ input, authorization }) => {
+const handler: Handler = withAdminAudit({
+  action: 'updateAccountHandle',
+  targetDidFrom: (input) => {
+    const did = (input as { did?: unknown } | null)?.did
+    return typeof did === 'string' ? did : undefined
+  },
+}, async ({ input, authorization }) => {
   await requireAdmin(authorization)
   const parsed = InputSchema.safeParse(input)
   if (!parsed.success) {
@@ -66,7 +73,7 @@ const handler: Handler = async ({ input, authorization }) => {
 
   await emitIdentity({ did, handle })
   return undefined
-}
+})
 
 function isUniqueViolation(err: unknown): boolean {
   const code = (err as { code?: string } | null)?.code

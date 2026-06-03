@@ -17,13 +17,20 @@ import { BadRequest, Forbidden, NotFound } from '../errors'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { requireAdmin } from '~/pds/auth/middleware'
+import { withAdminAudit } from '~/pds/admin/audit'
 import { emitAccount, emitTombstone } from '~/pds/sequencer/sequence'
 
 const InputSchema = z.object({
   did: z.string().min(1),
 })
 
-const handler: Handler = async ({ input, authorization }) => {
+const handler: Handler = withAdminAudit({
+  action: 'deleteAccount',
+  targetDidFrom: (input) => {
+    const did = (input as { did?: unknown } | null)?.did
+    return typeof did === 'string' ? did : undefined
+  },
+}, async ({ input, authorization }) => {
   await requireAdmin(authorization)
   const parsed = InputSchema.safeParse(input)
   if (!parsed.success) {
@@ -47,7 +54,7 @@ const handler: Handler = async ({ input, authorization }) => {
   await emitAccount({ did, active: false, status: 'deleted' })
   await emitTombstone({ did })
   return undefined
-}
+})
 
 export const def: HandlerDef = { method: 'POST', handler }
 export const nsid = 'com.atproto.admin.deleteAccount'

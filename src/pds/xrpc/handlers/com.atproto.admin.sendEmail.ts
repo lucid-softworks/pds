@@ -17,6 +17,7 @@ import { BadRequest, NotFound } from '../errors'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { requireAdmin } from '~/pds/auth/middleware'
+import { withAdminAudit } from '~/pds/admin/audit'
 import { sendEmail } from '~/pds/auth/email_sender'
 
 const InputSchema = z.object({
@@ -26,7 +27,13 @@ const InputSchema = z.object({
   comment: z.string().optional(),
 })
 
-const handler: Handler = async ({ input, authorization }) => {
+const handler: Handler = withAdminAudit({
+  action: 'sendEmail',
+  targetDidFrom: (input) => {
+    const did = (input as { recipientDid?: unknown } | null)?.recipientDid
+    return typeof did === 'string' ? did : undefined
+  },
+}, async ({ input, authorization }) => {
   await requireAdmin(authorization)
   const parsed = InputSchema.safeParse(input)
   if (!parsed.success) {
@@ -52,7 +59,7 @@ const handler: Handler = async ({ input, authorization }) => {
     body: parsed.data.content,
   })
   return { sent: true }
-}
+})
 
 export const def: HandlerDef = { method: 'POST', handler }
 export const nsid = 'com.atproto.admin.sendEmail'

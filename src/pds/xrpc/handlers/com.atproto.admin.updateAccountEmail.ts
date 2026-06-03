@@ -18,6 +18,7 @@ import { BadRequest, Conflict, NotFound } from '../errors'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { requireAdmin } from '~/pds/auth/middleware'
+import { withAdminAudit } from '~/pds/admin/audit'
 import { findAccountByIdentifier } from '~/pds/auth/session'
 
 const InputSchema = z.object({
@@ -25,7 +26,17 @@ const InputSchema = z.object({
   email: z.string().min(3),
 })
 
-const handler: Handler = async ({ input, authorization }) => {
+const handler: Handler = withAdminAudit({
+  action: 'updateAccountEmail',
+  // `account` may be either a DID or a handle. Only commit it as targetDid
+  // when it looks DID-shaped; the resolved DID isn't visible at this layer.
+  // The handle case is still captured in the params snapshot.
+  targetDidFrom: (input) => {
+    const acct = (input as { account?: unknown } | null)?.account
+    if (typeof acct !== 'string') return undefined
+    return acct.startsWith('did:') ? acct : undefined
+  },
+}, async ({ input, authorization }) => {
   await requireAdmin(authorization)
   const parsed = InputSchema.safeParse(input)
   if (!parsed.success) {
@@ -52,7 +63,7 @@ const handler: Handler = async ({ input, authorization }) => {
     throw err
   }
   return undefined
-}
+})
 
 function isUniqueViolation(err: unknown): boolean {
   const code = (err as { code?: string } | null)?.code

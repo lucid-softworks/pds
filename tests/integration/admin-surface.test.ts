@@ -29,6 +29,7 @@ import { eq } from 'drizzle-orm'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
+import { adminAudit } from '~/lib/db/schema/audit'
 import { createAccount } from '~/pds/account/create'
 import { loginWithPassword } from '~/pds/auth/session'
 import { dispatch } from '~/pds/xrpc/server'
@@ -184,5 +185,96 @@ describe('admin surface — moderation lifecycle', () => {
     })
     expect(res.status).toBe(403)
     expect((res.body as { error: string }).error).toBe('InvalidAccountState')
+  })
+
+  it('admin_audit accumulated rows for every mutation, none for reads', async () => {
+    const rows = await db
+      .select({ action: adminAudit.action, result: adminAudit.result })
+      .from(adminAudit)
+    // The mutation surface ran twice with updateAccountStatus, once each for
+    // deleteAccount + deleteAccount-already-deleted (one ok, one error).
+    // Reads (getAccountInfo) ran three times but must NOT appear here.
+    const actions = rows.map((r) => r.action).sort()
+    expect(actions).toEqual(
+      [
+        'deleteAccount',
+        'deleteAccount',
+        'updateAccountStatus',
+        'updateAccountStatus',
+      ].sort(),
+    )
+    // No row for the read endpoints
+    expect(actions).not.toContain('getAccountInfo')
+    expect(actions).not.toContain('getAccountInfos')
+  })
+
+  it('failed admin.sendEmail emits an audit row with result=error', async () => {
+    const res = await call('com.atproto.admin.sendEmail', {
+      body: {
+        recipientDid: 'did:plc:does-not-exist',
+        subject: 'hi',
+        content: 'hello',
+      },
+      auth: basicAdmin(),
+    })
+    expect(res.status).toBe(404)
+    const rows = await db
+      .select()
+      .from(adminAudit)
+      .where(eq(adminAudit.action, 'sendEmail'))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.result).toBe('error')
+    expect(rows[0]!.errorMessage).toMatch(/account not found/)
+    expect(rows[0]!.targetDid).toBe('did:plc:does-not-exist')
+    expect(rows[0]!.actor).toBe('admin')
+  })
+
+  it('admin.getAuditLog returns rows newest-first', async () => {
+    const res = await call('com.atproto.admin.getAuditLog', {
+      method: 'GET',
+      auth: basicAdmin(),
+      query: { limit: '10' },
+    })
+    expect(res.status).toBe(200)
+    const body = res.body as {
+      entries: Array<{
+        id: string
+        action: string
+        result: string
+        actor: string
+        params: unknown
+        targetDid?: string
+      }>
+    }
+    expect(body.entries.length).toBeGreaterThan(0)
+    // First entry is the most recent — that's the failed sendEmail above.
+    const first = body.entries[0]!
+    expect(first.action).toBe('sendEmail')
+    expect(first.result).toBe('error')
+    expect(first.actor).toBe('admin')
+    expect(first.targetDid).toBe('did:plc:does-not-exist')
+    // Params decoded back from CBOR — readable JSON, not bytes
+    expect(first.params).toMatchObject({
+      recipientDid: 'did:plc:does-not-exist',
+      subject: 'hi',
+      content: 'hello',
+    })
+  })
+
+  it('admin.getAuditLog rejects with no auth', async () => {
+    const res = await call('com.atproto.admin.getAuditLog', { method: 'GET' })
+    expect(res.status).toBe(401)
+  })
+
+  it('admin.getAuditLog filters by action', async () => {
+    const res = await call('com.atproto.admin.getAuditLog', {
+      method: 'GET',
+      auth: basicAdmin(),
+      query: { action: 'deleteAccount' },
+    })
+    expect(res.status).toBe(200)
+    const body = res.body as { entries: Array<{ action: string }> }
+    expect(body.entries.length).toBeGreaterThan(0)
+    expect(body.entries.every((e) => e.action === 'deleteAccount')).toBe(true)
   })
 })

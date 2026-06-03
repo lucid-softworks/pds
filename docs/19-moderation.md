@@ -20,9 +20,12 @@ What ships here:
 - `com.atproto.admin.updateAccountEmail` — out-of-band email change.
 - `com.atproto.admin.sendEmail` — operator-to-user message.
 - `com.atproto.admin.deleteAccount` — admin-driven destroy.
+- `com.atproto.admin.getAuditLog` — read back the audit trail (see below).
 - `requireAdmin` in `src/pds/auth/middleware.ts` — HTTP Basic check.
 - `scripts/admin-hash.ts` (`pnpm admin:hash`) — generate the password
   digest you store in env.
+- `admin_audit` table + `withAdminAudit` wrapper in `src/pds/admin/audit.ts`
+  — every mutation in the surface above leaves a row.
 
 ## What moderation IS, here
 
@@ -223,8 +226,10 @@ forget.
 
 Subject defaults to `"Message from your PDS operator"`. `comment` is
 accepted for shape compatibility with the upstream lexicon (where it's
-an audit-trail field); we don't yet have an audit log to put it in, so
-it's a no-op.
+an audit-trail field); the audit log captures it as part of the
+`params` snapshot below, so passing a non-empty `comment` is the
+documented place to leave a free-text note on why a particular send was
+made.
 
 ## deleteAccount
 
@@ -245,6 +250,134 @@ Why the soft delete? Same reasoning as the user-side path in chapter 13:
   keeps reversibility cheap: in production you can build a "restore"
   flow on top of the existing row by flipping status back, if you trust
   the operator with that lever.
+
+## Audit log
+
+Every admin **mutation** writes one row to `admin_audit` — successful or
+not. The five verbs in scope:
+
+- `updateAccountStatus`
+- `updateAccountHandle`
+- `updateAccountEmail`
+- `sendEmail`
+- `deleteAccount`
+
+The two read verbs (`getAccountInfo`, `getAccountInfos`) deliberately
+do **not** write. They fire on every console refresh; if we logged
+them, an operator skimming a list of accounts would generate dozens of
+audit rows for nothing. The audit trail is for things that *changed*
+state.
+
+The table shape:
+
+```ts
+admin_audit {
+  id            bigserial PRIMARY KEY
+  actor         text NOT NULL              // 'admin' for HTTP Basic
+  action        text NOT NULL              // e.g. 'updateAccountStatus'
+  targetDid     text                       // the DID affected
+  params        bytea NOT NULL             // DAG-CBOR snapshot of input
+  occurredAt    timestamptz DEFAULT now()
+  ipAddr        text                       // x-forwarded-for / x-real-ip
+  result        text NOT NULL              // 'ok' | 'error'
+  errorMessage  text                       // present when result='error'
+}
+```
+
+Two indexes:
+
+- `(occurred_at DESC)` — "the last N actions", the default console view.
+- `(target_did, occurred_at DESC)` — per-account history.
+
+`actor` is the string `'admin'` today: HTTP Basic doesn't carry an
+operator identity. A future surface that ships per-operator credentials
+would populate this column with whatever identifier the credentials
+expose; the column is text rather than enum so the migration path is
+free.
+
+### Why DAG-CBOR for `params`?
+
+The audit table is the *only* place we still hold what the admin
+actually told the endpoint. If the input is `{ did: 'did:plc:abc',
+status: 'takendown' }` we want to read that back later, byte-faithfully.
+JSON would do for plain objects, but it punts on `Uint8Array` (silently
+turns into `{ "0": …, "1": … }`) and bigint (throws). We already use
+DAG-CBOR everywhere else in the PDS — blocks, commits, firehose events
+— and it's deterministic, so the on-disk form for the same input is
+the same bytes every time. The read endpoint decodes back and
+re-stringifies into JSON-safe shapes (CIDs → strings, Uint8Array → `{
+$bytes: <base64> }`) so the console sees readable values.
+
+### `withAdminAudit` wrapper
+
+To avoid open-coding the same try/finally pattern in seven handlers,
+each mutation handler wraps its body once:
+
+```ts
+const handler: Handler = withAdminAudit({
+  action: 'updateAccountStatus',
+  targetDidFrom: (input) => (input as { did?: unknown })?.did as string,
+}, async ({ input, authorization }) => {
+  await requireAdmin(authorization)
+  // ... existing handler body
+})
+```
+
+The wrapper:
+
+1. Pulls the client IP from `x-forwarded-for` / `x-real-ip` headers.
+2. Calls the body.
+3. Writes a `result='ok'` row on success — or `result='error'` (with
+   `errorMessage`) on a thrown XrpcError or anything else — and
+   re-throws so the dispatcher renders the canonical envelope unchanged.
+
+It never throws on its own. An audit-side failure is logged and
+swallowed; if the rows are mission-critical you'd page on those, but
+the audit log going down must not take the admin surface down with it.
+
+### Reading it back: `getAuditLog`
+
+```
+GET /xrpc/com.atproto.admin.getAuditLog
+  ?limit=50&cursor=<id>&targetDid=<did>&action=<actionName>
+```
+
+`requireAdmin` like the rest of the surface. Returns rows newest-first
+with cursor pagination on `id` (the cursor is the smallest `id` from
+the previous page). The handler decodes `params` back from CBOR and
+JSON-safe-converts it; the response is a plain JSON envelope:
+
+```json
+{
+  "cursor": "12",
+  "entries": [
+    {
+      "id": "15",
+      "actor": "admin",
+      "action": "sendEmail",
+      "targetDid": "did:plc:nobody",
+      "params": {
+        "recipientDid": "did:plc:nobody",
+        "subject": "hi",
+        "content": "hello"
+      },
+      "occurredAt": "2026-01-01T12:00:00.000Z",
+      "ipAddr": "10.0.0.1",
+      "result": "error",
+      "errorMessage": "account not found: did:plc:nobody"
+    }
+  ]
+}
+```
+
+### Retention
+
+Rows are **never auto-deleted**. The PDS doesn't ship a sweeper for the
+audit table — that's an operator concern, and the right policy depends
+on your retention contract. A `DELETE FROM admin_audit WHERE
+occurred_at < now() - interval '1 year'` cron is the simple version;
+exporting to cold storage first is the responsible version. Either way,
+the PDS itself takes no opinion.
 
 ## What changes for the user
 
@@ -326,11 +459,12 @@ before exposing it to a public network:
   and restrict `/xrpc/com.atproto.admin.*` to your office / VPN / bastion
   IPs. There's no reason an admin endpoint should answer to the public
   internet.
-- **Audit log.** The PDS doesn't write one yet. Every admin endpoint is a
-  candidate: log the operator (well, the source IP — we don't have
-  per-operator identity), the NSID, the target DID, the timestamp, the
-  outcome. A separate `admin_audit` table would do; a future chapter will
-  add it.
+- **Audit log retention.** The `admin_audit` table fills up forever by
+  design — see the *Audit log* section above. Pick a retention window
+  (90 days, a year, whatever your contract says), schedule a `DELETE`
+  job that respects it, and consider exporting older rows to cold
+  storage before they drop. The PDS ships the trail; what you keep is
+  yours to decide.
 - **Separate infrastructure from user traffic.** Even with an IP
   allowlist, running admin on the same port as user XRPC means a bug in
   one accidentally exposes the other. A separate `:3001` listener bound
@@ -350,11 +484,12 @@ before exposing it to a public network:
    `takendown` → `deactivated` → `active`. Is that meaningful? Why or
    why not — and what does an AppView do with the sequence?
 
-2. The chapter says `sendEmail` accepts a `comment` field and does
-   nothing with it. Sketch a minimal `admin_audit` table that captures
-   `(timestamp, nsid, target_did, comment)` and wire `sendEmail`,
-   `updateAccountStatus`, and `deleteAccount` to write to it. Where does
-   the operator-identity column come from?
+2. `admin_audit` ships with `actor='admin'` for every row because HTTP
+   Basic doesn't carry operator identity. Sketch the smallest credential
+   change that would let you populate `actor` with a real name — without
+   inventing a full per-operator account system. (Hint: the Basic
+   username field is currently *ignored*; what changes if you start
+   trusting it, and what extra check does that demand?)
 
 3. The PLC-rotation divergence for `updateAccountHandle` is open. What
    subset of the rotation logic do you need to wire in to make the DID

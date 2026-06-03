@@ -71,6 +71,7 @@ import * as adminUpdateAccountHandle from './com.atproto.admin.updateAccountHand
 import * as adminUpdateAccountEmail from './com.atproto.admin.updateAccountEmail'
 import * as adminSendEmail from './com.atproto.admin.sendEmail'
 import * as adminDeleteAccount from './com.atproto.admin.deleteAccount'
+import * as adminGetAuditLog from './com.atproto.admin.getAuditLog'
 
 export const registry = new HandlerRegistry()
   .register(createAccount.nsid, createAccount.def)
@@ -129,3 +130,4 @@ export const registry = new HandlerRegistry()
   .register(adminUpdateAccountEmail.nsid, adminUpdateAccountEmail.def)
   .register(adminSendEmail.nsid, adminSendEmail.def)
   .register(adminDeleteAccount.nsid, adminDeleteAccount.def)
+  .register(adminGetAuditLog.nsid, adminGetAuditLog.def)
