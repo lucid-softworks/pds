@@ -17,7 +17,8 @@
     "db:studio": "drizzle-kit studio",
     "format": "prettier --write \"**/*.{ts,tsx,md,json,css}\"",
     "lint": "eslint . --ext .ts,.tsx",
-    "admin:hash": "tsx scripts/admin-hash.ts"
+    "admin:hash": "tsx scripts/admin-hash.ts",
+    "pds-admin": "tsx scripts/pds-admin.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.14",
