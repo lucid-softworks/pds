@@ -424,24 +424,78 @@ controls). This is the same trade-off the upstream PDS makes, and we
 may revisit it once we have a clearer notion of "rotate all credentials"
 as one user-facing operation.
 
-## The dev email sender
+## The email backend
 
-`src/pds/auth/email_sender.ts` is a stub:
+`src/pds/auth/email_sender.ts` is a tiny pluggable backend. Every place in
+the codebase that needs to send mail goes through one function:
 
 ```ts
-export async function sendEmail({ to, subject, body }): Promise<void> {
-  console.log(... structured banner with the body inline ...)
-}
+export async function sendEmail(msg: EmailMessage): Promise<void>
 ```
 
-It logs every "send" to the terminal with a clear divider so you can
-scroll back, find the token, and paste it into the next `curl`. There is
-no SMTP, no DKIM, no bounce handling. That's a feature for the dev loop
-— you don't need a mailserver to test the flow end to end — and a problem
-we deliberately defer to chapter 18, where we'll swap the body of this
-one function for a transactional provider call and the rest of the
-codebase won't notice. The function signature is the abstraction
-boundary.
+…which delegates to whichever backend `getEmailBackend()` picked at
+startup. Two backends ship:
+
+- **`ConsoleEmailBackend`** — the default. Writes a structured info log
+  line with the body inlined between two divider lines so a developer
+  can scroll back and copy the token straight out of the terminal. No
+  SMTP, no DKIM, no bounce handling. That's a feature for the dev loop:
+  you don't need a mailserver to test the email-token flows end to end.
+
+- **`HttpJsonEmailBackend`** — POSTs the email to a generic transactional
+  endpoint over JSON. Compatible out of the box with Resend, Mailgun,
+  and any self-hosted relay (`flavor: 'generic'`) or Postmark
+  (`flavor: 'postmark'`). The body shapes are:
+
+  ```json
+  // generic
+  { "from": "...", "to": "...", "subject": "...", "text": "...", "replyTo": "..." }
+
+  // postmark
+  { "From": "...", "To": "...", "Subject": "...", "TextBody": "...", "ReplyTo": "..." }
+  ```
+
+  The request includes `Authorization: Bearer <token>` and a 10-second
+  abort timeout. On 4xx/5xx or a network error the backend logs at error
+  level and throws.
+
+Operator wires the backend through these env vars:
+
+| Var | Meaning |
+| --- | --- |
+| `PDS_EMAIL_BACKEND` | `console` (default) or `http-json` |
+| `PDS_EMAIL_FROM` | "From" address (required for `http-json`) |
+| `PDS_EMAIL_HTTP_URL` | Endpoint URL (required for `http-json`) |
+| `PDS_EMAIL_HTTP_TOKEN` | Bearer token (required for `http-json`) |
+| `PDS_EMAIL_HTTP_FLAVOR` | `generic` (default) or `postmark` |
+
+If `PDS_EMAIL_BACKEND=http-json` and any of URL / token / from is
+missing, the process refuses to start with a clear message — better
+than discovering a misconfiguration the first time a user requests a
+password reset.
+
+### Why no SMTP backend
+
+Node's standard library doesn't ship an SMTP client. The obvious add is
+`nodemailer`, which would drag a dozen transitive packages into the tree
+for one delivery path. The teaching port has a hard "no new dependencies"
+rule, so we don't. Operators who need SMTP put their server's SMTP relay
+behind a small HTTP shim and point `PDS_EMAIL_HTTP_URL` at it. The shim
+is ~20 lines in any language and keeps the SMTP surface inside one piece
+of infrastructure the operator already manages.
+
+### Send-failure policy
+
+Every email-token handler — `requestPasswordReset`,
+`requestEmailConfirmation`, `requestEmailUpdate`,
+`requestAccountDelete`, `requestPlcOperationSignature`, and the
+admin-driven `admin.sendEmail` — writes the token to `email_tokens`
+*before* it calls `sendEmail`. If delivery fails the row is still
+there, the call surfaces an error to the client, and the user can
+request another email. The next request issues a fresh token (issuance
+drops the prior row — see `issueEmailToken` in
+`src/pds/auth/email.ts`), so a transient provider outage doesn't leave
+anyone holding an unredeemable code.
 
 ## Account lifecycle
 

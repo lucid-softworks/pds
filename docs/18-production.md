@@ -22,9 +22,10 @@ swapped for production equivalents:
 | TLS | None (HTTP on :3000) | Terminating proxy or cloud LB |
 | Handle wildcards | `alice.test` | `*.<your-domain>` with DNS + TLS cert |
 | Signing keys | Plaintext hex in `accounts.signing_key_priv` | KMS-wrapped or age-encrypted |
-| Email | Logged to console | Transactional provider |
+| Email | Logged to console (`ConsoleEmailBackend`) | HTTP-JSON to Resend / Postmark / Mailgun / a self-hosted relay (`HttpJsonEmailBackend`) |
 | Backups | None | `pnpm pds:export` on a schedule, ch. 23 |
 | Observability | `console.log` | Structured logs, metrics, alerts |
+| Rate limiting | None in dev | `InMemoryRateLimitStore` + Redis swap for multi-replica |
 
 We'll take each in turn.
 
@@ -349,6 +350,108 @@ Page on:
 - **OpenTelemetry tracing.** The natural next step is span propagation
   through the dispatcher → orchestrator → DB call chain. Out of scope
   here; the chapter on distributed systems will pick it up.
+
+## Rate limiting
+
+The XRPC dispatcher consults `rateLimitFor(nsid, method)` after lexicon
+validation and before invoking the handler. A non-null result is then
+checked against a process-wide store; a rejection short-circuits the
+request with `429 RateLimitExceeded` and a `Retry-After: <seconds>`
+header.
+
+The defaults sit in a hardcoded table in `src/pds/xrpc/rate_limit.ts`,
+roughly mirroring what the upstream PDS does today:
+
+| NSID family | Capacity | Window |
+| --- | --- | --- |
+| `com.atproto.server.createAccount` | 100 | 1 day |
+| `com.atproto.server.createSession` | 30 | 5 min |
+| `com.atproto.server.refreshSession` | 50 | 5 min |
+| `com.atproto.server.requestPasswordReset` | 5 | 5 min |
+| `com.atproto.server.resetPassword` | 5 | 5 min |
+| `com.atproto.server.requestEmailConfirmation` | 5 | 5 min |
+| `com.atproto.server.requestEmailUpdate` | 5 | 5 min |
+| `com.atproto.server.requestAccountDelete` | 5 | 5 min |
+| `com.atproto.identity.updateHandle` | 10 | 5 min |
+| `com.atproto.identity.requestPlcOperationSignature` | 5 | 5 min |
+| `com.atproto.repo.uploadBlob` | 5000 | 1 hour |
+| `com.atproto.repo.createRecord` / `putRecord` / `deleteRecord` / `applyWrites` | 7000 | 1 hour |
+| everything else | — | no limit |
+
+The key is `${ip}:${nsid}`. Bucketing on the IP alone would punish
+shared NAT egress, and on the account alone would punish power users
+who legitimately drive a lot of write traffic from one IP. Per-IP +
+per-NSID is the middle ground: a credential-stuffing campaign against
+`createSession` from one origin trips the 30-per-5-minute cap without
+affecting that origin's record writes; a chatty cron writing records
+doesn't accidentally lock its operator out of the password-reset flow.
+
+### The store
+
+The default is `InMemoryRateLimitStore`, a token bucket in a `Map<key,
+Bucket>`. One process, one map, no network round-trip. If you run more
+than one PDS process behind a load balancer each instance sees ~half
+the per-IP traffic and the effective cap doubles — sometimes that's
+fine, sometimes it isn't. For shared limits, swap in a Redis-backed
+store. The teaching port ships `RedisRateLimitStore` as a documented
+stub (we don't pull in `ioredis` for the same "no new deps" reason
+the email backend skips `nodemailer`). The Lua sketch in the source
+comment shows the SETEX+DECR pattern:
+
+```lua
+local current = redis.call('GET', KEYS[1])
+if not current then
+  redis.call('SETEX', KEYS[1], ARGV[2], ARGV[1] - 1)
+  return ARGV[1] - 1
+end
+if tonumber(current) <= 0 then
+  return -redis.call('PTTL', KEYS[1])
+end
+redis.call('DECR', KEYS[1])
+return current - 1
+```
+
+SETEX seeds the bucket with `capacity - 1` and sets the window TTL in
+one round trip; DECR is atomic; PTTL on the empty path tells the
+client exactly when the window resets, which is what we surface as
+`Retry-After`.
+
+### Client IP derivation
+
+`callerIpFromRequest` prefers the first non-private hop of
+`X-Forwarded-For`, then `X-Real-IP`, then falls back to the literal
+string `'unknown'`. If the fallback fires in a non-localhost
+deployment, every anonymous caller collapses into one bucket — fine
+for a single developer hitting `http://localhost:3000`, very wrong
+for production. The limiter logs a one-shot warning the first time it
+hits the `'unknown'` path per process, on the assumption that a
+misconfigured reverse proxy is the only realistic explanation.
+
+The PDS doesn't validate that XFF came from a trusted hop. That's
+deliberate: every realistic deployment fronts the PDS with Caddy /
+nginx / a cloud LB that strips client-supplied XFF and re-sets a
+trusted chain, and that's the right authority for trust decisions.
+
+### Operator overrides
+
+The policy table is hardcoded today. Plumbing it through env vars is
+a follow-up — the natural shape is `PDS_RATE_LIMIT_<NSID_UNDERSCORE>`
+plus a `PDS_RATE_LIMITS_DISABLED=true` master switch for local
+debugging.
+
+### Behaviour clients should implement
+
+A 429 response carries a `Retry-After: <seconds>` header. Well-behaved
+clients honour it: they back off for at least that long, then retry
+with exponential jitter on top. Clients that hammer back immediately
+turn a transient cap into a sustained one, because every premature
+retry consumes the next refilled token the moment it arrives.
+
+The rate-limit metric, `pds_rate_limit_rejected_total{nsid}`, is the
+right signal to alert on. A non-zero sustained rate against an NSID
+that's normally idle (e.g. `createSession`, `requestPasswordReset`)
+almost always indicates an active credential-stuffing or
+account-enumeration run.
 
 ## Benchmarking + load testing
 

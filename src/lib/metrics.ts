@@ -276,3 +276,13 @@ export const blobsTotal = makeResettableCounter(
   'pds_blobs_total',
   'Total blob metadata rows inserted (monotonic; not decremented on GC).',
 )
+
+/** XRPC requests rejected by the per-NSID rate limiter. Broken down by
+ *  NSID — the chapter recommends alerting on a sustained non-zero rate
+ *  for an NSID that's normally idle, which usually means a credential-
+ *  stuffing run against `createSession` or similar. */
+export const rateLimitRejectedTotal = makeResettableCounter(
+  'pds_rate_limit_rejected_total',
+  'XRPC requests rejected by the rate limiter, by NSID.',
+  ['nsid'],
+)

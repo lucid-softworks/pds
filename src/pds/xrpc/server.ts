@@ -17,11 +17,17 @@
 
 import { getLogger } from '~/lib/logger'
 import {
+  rateLimitRejectedTotal,
   xrpcRequestDurationSeconds,
   xrpcRequestsTotal,
 } from '~/lib/metrics'
 import { XrpcError, InternalError, BadRequest, NotFound } from './errors'
 import { validateInbound, validateOutbound } from './lexicon-bridge'
+import {
+  callerIpFromRequest,
+  getRateLimitStore,
+  rateLimitFor,
+} from './rate_limit'
 
 const log = getLogger('xrpc')
 
@@ -126,6 +132,47 @@ export async function dispatch(
 
     // Validate against the lexicon (observe-only unless LEXICON_STRICT=true).
     await validateInbound(nsid, { input, params })
+
+    // Rate-limit gate. Sits between lexicon validation and the handler:
+    // a malformed payload short-circuits without consuming a token (so a
+    // misbehaving client gets 400s on its schema bug instead of having
+    // its 5-per-5min reset-password budget spent), and a well-formed
+    // payload only reaches the handler if there's capacity left.
+    const limit = rateLimitFor(nsid, method)
+    if (limit) {
+      const ip = callerIpFromRequest(request)
+      const key = `${ip}:${nsid}`
+      const decision = await getRateLimitStore().check(key, limit)
+      if (!decision.allowed) {
+        rateLimitRejectedTotal.inc({ nsid })
+        const retryAfterSeconds = Math.max(
+          1,
+          Math.ceil(decision.retryAfterMs / 1000),
+        )
+        reqLog.warn('xrpc-rate-limited', {
+          ip,
+          retryAfterSeconds,
+          capacity: limit.capacity,
+          windowMs: limit.windowMs,
+        })
+        return respond(
+          new Response(
+            JSON.stringify({
+              error: 'RateLimitExceeded',
+              message: `rate limit exceeded for ${nsid}`,
+            }),
+            {
+              status: 429,
+              headers: {
+                'content-type': 'application/json; charset=utf-8',
+                'cache-control': 'no-store',
+                'retry-after': String(retryAfterSeconds),
+              },
+            },
+          ),
+        )
+      }
+    }
 
     const output = await def.handler({
       input,
