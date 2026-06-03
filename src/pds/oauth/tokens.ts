@@ -15,7 +15,8 @@
 // tokens, with `kind='oauth'`, `dpop_jkt` set, and `scope` set. See chapter
 // 21 — OAuth.
 
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
+import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core'
 import { hexToBytes } from '@noble/hashes/utils'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import { SignJWT, jwtVerify, importJWK, type JWTPayload, type KeyLike } from 'jose'
@@ -24,7 +25,14 @@ import { randomBytes } from 'node:crypto'
 import { getConfig } from '~/lib/config'
 import { db } from '~/lib/db'
 import { refreshTokens } from '~/lib/db/schema'
+import { oauthCodes } from '~/lib/db/schema/oauth'
 import { getOauthSigningKey } from './keys'
+
+// `db` is a union of pglite + postgres-js drivers; TypeScript collapses
+// `.returning(fields)` to its no-arg form across the union. Narrow once
+// here so the OAuth-code update can read back the row it touched. See the
+// same trick in src/pds/sequencer/sequence.ts.
+const pg = db as unknown as PgDatabase<PgQueryResultHKT>
 
 const ACCESS_TTL_SECONDS_DEFAULT = 30 * 60 // 30 minutes
 const REFRESH_TTL_SECONDS = 60 * 24 * 60 * 60 // 60 days, matching chapter 13
@@ -269,4 +277,102 @@ export async function verifyOauthAccessToken(jwt: string): Promise<{
 
 function randomJti(): string {
   return randomBytes(16).toString('base64url')
+}
+
+// ─── authorization codes ───────────────────────────────────────────────────
+//
+// Authorization codes are opaque random strings, not JWTs. They live in the
+// `oauth_codes` table for ~60 seconds and are single-use: redemption flips
+// `used` to true atomically inside the lookup. We don't sign them because:
+//
+//   - The full state (did, scope, dpop_jkt, PKCE challenge, redirect_uri,
+//     client_id) is server-side anyway, so there's nothing useful for a
+//     client to read off the code itself.
+//   - A random 256-bit string is cheaper than a JWT verify on every redeem.
+//   - Bluesky's reference PDS does the same thing.
+
+const CODE_TTL_SECONDS = 60
+
+/** Mint a fresh authorization code and persist its state. The code itself
+ *  is what we hand back to the browser; it goes into the redirect query
+ *  string and back to us via /oauth/token. */
+export async function signOauthCode(args: {
+  did: string
+  clientId: string
+  redirectUri: string
+  scope: string
+  codeChallenge: string
+  codeChallengeMethod: string
+  dpopJkt: string
+}): Promise<{ code: string; exp: number }> {
+  // 32 random bytes → 43-char base64url. urn:ietf:params:oauth:authorization
+  // -code:<that> would be more spec-compliant, but the reference PDS and
+  // every client we've seen treats the code as an opaque string anyway.
+  const code = randomBytes(32).toString('base64url')
+  const exp = Math.floor(Date.now() / 1000) + CODE_TTL_SECONDS
+  await db.insert(oauthCodes).values({
+    code,
+    did: args.did,
+    clientId: args.clientId,
+    redirectUri: args.redirectUri,
+    scope: args.scope,
+    codeChallenge: args.codeChallenge,
+    codeChallengeMethod: args.codeChallengeMethod,
+    dpopJkt: args.dpopJkt,
+    used: false,
+    expiresAt: new Date(exp * 1000),
+  })
+  return { code, exp }
+}
+
+export type ConsumedOauthCode = {
+  did: string
+  clientId: string
+  redirectUri: string
+  scope: string
+  codeChallenge: string
+  codeChallengeMethod: string
+  dpopJkt: string
+}
+
+/** Look up an authorization code, mark it used, return its bound state.
+ *  Throws if missing, expired, or already used. */
+export async function consumeOauthCode(
+  code: string,
+): Promise<ConsumedOauthCode> {
+  const rows = await db
+    .select()
+    .from(oauthCodes)
+    .where(eq(oauthCodes.code, code))
+    .limit(1)
+  const row = rows[0]
+  if (!row) {
+    throw new Error('authorization code not found')
+  }
+  if (row.used) {
+    throw new Error('authorization code already used')
+  }
+  if (row.expiresAt.getTime() < Date.now()) {
+    throw new Error('authorization code expired')
+  }
+  // Single-use flip: mark used WHERE used=false so a racing second redeem
+  // sees zero affected rows and the next select sees used=true.
+  const updated = await pg
+    .update(oauthCodes)
+    .set({ used: true })
+    .where(and(eq(oauthCodes.code, code), eq(oauthCodes.used, false)))
+    .returning({ code: oauthCodes.code })
+  if (updated.length === 0) {
+    // Another request claimed the code between our select and update.
+    throw new Error('authorization code already used')
+  }
+  return {
+    did: row.did,
+    clientId: row.clientId,
+    redirectUri: row.redirectUri,
+    scope: row.scope,
+    codeChallenge: row.codeChallenge,
+    codeChallengeMethod: row.codeChallengeMethod,
+    dpopJkt: row.dpopJkt,
+  }
 }

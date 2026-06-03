@@ -7,24 +7,34 @@ from "send your password to every app you trust" toward a proper OAuth
 flow with browser-mediated consent, per-client keys, and DPoP-bound tokens
 that are useless to anyone who steals them in transit.
 
-This chapter is the back half of OAuth in this PDS. The user-facing pieces
-(the consent screen, the login UI, `/oauth/authorize`, `/oauth/par`) are a
-follow-on session of their own; everything they need to sit on *is* here.
-Concretely, this chapter ships:
+This chapter walks through both halves of OAuth on this PDS. The original
+session shipped the back half (the surface that lets us *be* a resource
+server once a refresh token is in hand); a follow-on session shipped the
+front half (the surface that *mints* the first refresh token through a
+real browser-mediated consent flow). Concretely:
 
 - The OAuth discovery documents at `/.well-known/oauth-authorization-server`
   and `/.well-known/oauth-protected-resource`.
 - A JWKS endpoint at `/oauth/jwks`.
-- The token endpoint at `/oauth/token`, implementing the `refresh_token`
-  grant.
+- The PAR endpoint at `/oauth/par` (RFC 9126) — clients push their full
+  authorize-request parameters over the back channel and get a short-lived
+  `request_uri` opaque handle in return.
+- The user-facing authorization endpoint at `/oauth/authorize` — looks up
+  the PAR row, renders a login + consent screen, verifies the user's
+  password, mints a one-shot authorization code, and 302s back to the
+  client's `redirect_uri` with the code.
+- The token endpoint at `/oauth/token`, implementing both the
+  `authorization_code` grant (first-issue) and the `refresh_token` grant
+  (rotation).
 - The revocation endpoint at `/oauth/revoke`.
 - DPoP proof verification per RFC 9449.
+- Client-metadata fetching + validation (`src/pds/oauth/clients.ts`).
+- PKCE verifier ↔ challenge check (`src/pds/oauth/pkce.ts`).
 - A new PDS-wide OAuth signing key (separate from the per-account repo
   keys we've been carrying since chapter 7).
 - An extended `refresh_tokens` table that holds both legacy session
-  refreshes and OAuth refreshes side by side.
-- Stub routes at `/oauth/authorize` and `/oauth/par` that return 501 and
-  point at this chapter.
+  refreshes and OAuth refreshes side by side, plus two new short-lived
+  stores: `oauth_par` (PAR handles) and `oauth_codes` (authorization codes).
 
 OAuth is *additive*. The password flow from chapter 13 continues to mint
 HS256 access + refresh JWTs and works on every endpoint exactly as it did
@@ -61,25 +71,33 @@ client can confirm the AS is the one this RS trusts.
 > design keeps everything user-controllable on the same hop the user
 > moves when they migrate. See chapter 20.
 
-## What this session ships, and what it doesn't
+## What's shipped, and what's still missing
 
-The pieces in this chapter are sufficient to be a *resource server* with
-DPoP-bound bearer tokens — once you have a refresh token in hand. They
-are **not** sufficient to *issue* a brand-new refresh token through the
-OAuth flow: that requires `/oauth/authorize` (the user actually clicks
-"yes, this app can post on my behalf") and `/oauth/par` (the front
-channel uses opaque request_uri handles, not raw query params), both of
-which are 501-stubs here.
+The full first-issue → rotation loop now works end-to-end: a client can
+push parameters via PAR, redirect the user through `/oauth/authorize`,
+exchange the returned code at `/oauth/token` for a DPoP-bound access +
+refresh pair, then keep rotating that pair via the `refresh_token` grant.
+The integration test at `tests/integration/oauth-front-half.test.ts`
+exercises exactly that path.
 
-The bridge across the gap is intentional. Until the authorize endpoint
-ships, the way to get an OAuth refresh token for a given account is to
-*mint one cross-protocol*: the user logs in with their password through
-the chapter-13 `createSession` endpoint, then we call
-`signOauthRefreshToken` directly. That's a fixture path; real clients
-will go through `/oauth/par` → `/oauth/authorize` once those land. The
-"Try it" section at the end of this chapter walks through it.
+Two pieces remain on the roadmap, both 🚧:
 
-Flagged as 🚧 below: what's still missing, item by item.
+- **Resource-server enforcement** (`requireOauthAccess`). The OAuth
+  tokens we mint are still unrouted on the XRPC surface — no handler
+  rejects on a bad scope, or accepts an OAuth bearer in place of an
+  HS256 session JWT. Wave 9B handles it.
+- **Shared DPoP replay store.** The in-process `jti` cache works for
+  single-process deploys but a multi-process PDS shares nothing. A Redis
+  (or pglite-shared-row) cache is a small follow-up.
+
+Everything else in the original 🚧 list shipped:
+
+- ~~`/oauth/authorize` — login + consent UI~~ ✅
+- ~~`/oauth/par` — Pushed Authorization Requests~~ ✅
+- ~~Client metadata fetching and validation~~ ✅
+- ~~PKCE verification (S256-only)~~ ✅
+- ~~Authorization-code lifetime + rotation policy~~ ✅ (60 s,
+  single-use, marked `used` atomically)
 
 ## DPoP — proof of possession
 
@@ -359,28 +377,165 @@ columns at all — its inserts leave them at their defaults (`kind` =
 A future "list all my sessions across both protocols" endpoint would
 read both `kind`s together and render them in a unified view.
 
+## The full authorization flow
+
+With both halves in place, here's what an OAuth client does end-to-end
+to get its first access token. Each step names the spec it's
+implementing so you can cross-reference.
+
+1. **Discover** the AS by fetching
+   `/.well-known/oauth-authorization-server` (RFC 8414). The client
+   reads our PAR endpoint, token endpoint, scopes, supported DPoP algs.
+
+2. **Generate** a fresh DPoP keypair (per-session, per-app — never
+   reused across clients). Compute its RFC 7638 thumbprint; that's the
+   `jkt` it'll bind tokens to.
+
+3. **Generate** a PKCE pair — 32 random bytes base64url'd is the
+   `code_verifier`; `base64url(sha256(verifier))` is the
+   `code_challenge`. Pick `state` (random) the same way.
+
+4. **PAR push** — POST `/oauth/par` with the parameters:
+   ```
+   client_id              https://app.example.com/client-metadata.json
+   response_type          code
+   redirect_uri           https://app.example.com/cb
+   scope                  atproto transition:generic
+   state                  <random>
+   code_challenge         <base64url sha256 of the verifier>
+   code_challenge_method  S256
+   dpop_jkt               <thumbprint of the DPoP key>
+   login_hint             alice.example.com           (optional)
+   ```
+   On success the client gets `{ request_uri, expires_in: 60 }`.
+
+5. **Redirect** the user's browser to
+   `/oauth/authorize?request_uri=<urn>`. The PDS looks up the PAR row,
+   renders a login + consent screen pre-filled with the `login_hint`,
+   sets a CSRF cookie, and waits for the form POST.
+
+6. **Sign in.** The user types their handle + password, the browser
+   POSTs back to `/oauth/authorize?request_uri=<urn>`. The PDS verifies
+   the CSRF token, verifies the password via the same `loginWithPassword`
+   chapter 13 uses, mints a one-shot authorization `code` bound to the
+   PAR row's `dpop_jkt` / PKCE challenge / scope, deletes the PAR row,
+   and 302s the browser to
+   `<redirect_uri>?code=<code>&state=<state>&iss=<issuer>`.
+
+7. **Token exchange.** The client POSTs `/oauth/token` with:
+   ```
+   grant_type     authorization_code
+   code           <the code>
+   redirect_uri   <must match step 4>
+   client_id      <must match step 4>
+   code_verifier  <the raw PKCE verifier from step 3>
+   ```
+   Headers include `DPoP: <freshly signed proof>` whose `jkt` matches
+   what was pinned at PAR time. The PDS verifies the DPoP proof,
+   atomically marks the code used, verifies `sha256(verifier) ===
+   challenge`, cross-checks `redirect_uri` and `client_id`, then mints
+   an access + refresh JWT pair both bound (`cnf.jkt`) to the DPoP key.
+
+8. **Use the access token** with `Authorization: DPoP <access_jwt>` +
+   `DPoP: <fresh proof for this request>` on every call.
+
+9. **Rotate** by POSTing `/oauth/token` with `grant_type=refresh_token`
+   when the access expires. The refresh token is single-use — the old
+   row gets deleted, a fresh pair gets minted with the same `cnf.jkt`.
+
+### Run it locally
+
+```bash
+# 0. Generate signing key + start the dev server.
+export PDS_OAUTH_SIGNING_KEY=$(openssl rand -hex 32)
+pnpm dev
+```
+
+```ts
+// dev-oauth-flow.ts — run with `pnpm tsx dev-oauth-flow.ts`.
+import {
+  SignJWT,
+  exportJWK,
+  generateKeyPair,
+  calculateJwkThumbprint,
+} from 'jose'
+import { createHash, randomBytes } from 'node:crypto'
+
+const PDS = 'http://localhost:3000'
+const CLIENT_ID = `${PDS}/dev-client.json` // host the JSON yourself
+const REDIRECT_URI = `${PDS}/dev-client/cb`
+
+const { privateKey, publicKey } = await generateKeyPair('ES256', {
+  extractable: true,
+})
+const jwk = await exportJWK(publicKey)
+const jkt = await calculateJwkThumbprint(jwk, 'sha256')
+
+const verifier = randomBytes(32).toString('base64url')
+const challenge = createHash('sha256').update(verifier).digest('base64url')
+const state = randomBytes(16).toString('base64url')
+
+const par = await fetch(`${PDS}/oauth/par`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({
+    client_id: CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: REDIRECT_URI,
+    scope: 'atproto transition:generic',
+    state,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    dpop_jkt: jkt,
+    login_hint: 'alice.test',
+  }),
+}).then((r) => r.json())
+
+console.log(`open in your browser:
+  ${PDS}/oauth/authorize?request_uri=${encodeURIComponent(par.request_uri)}`)
+
+// After sign-in, the redirect URL will contain ?code=<...> — paste it:
+const code = process.argv[2]
+if (!code) {
+  console.error('run again with the code from the redirect:')
+  console.error('  pnpm tsx dev-oauth-flow.ts <code>')
+  process.exit(1)
+}
+
+const proof = await new SignJWT({
+  htm: 'POST',
+  htu: `${PDS}/oauth/token`,
+  jti: randomBytes(8).toString('base64url'),
+})
+  .setProtectedHeader({ alg: 'ES256', typ: 'dpop+jwt', jwk })
+  .setIssuedAt()
+  .sign(privateKey)
+
+const tokens = await fetch(`${PDS}/oauth/token`, {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/x-www-form-urlencoded',
+    DPoP: proof,
+  },
+  body: new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: REDIRECT_URI,
+    client_id: CLIENT_ID,
+    code_verifier: verifier,
+  }),
+}).then((r) => r.json())
+
+console.log(tokens)
+// → { access_token, refresh_token, token_type: 'DPoP', expires_in, scope, sub }
+```
+
+The `sub` claim is the user's DID; the access token's `cnf.jkt` matches
+the thumbprint of the DPoP key you generated; the refresh token is
+already persisted in the `refresh_tokens` table with `kind='oauth'` and
+the same `dpop_jkt`.
+
 ## What's still missing
-
-🚧 **`/oauth/authorize`.** The user-facing consent screen. A real
-implementation looks up the `request_uri` pushed via PAR, resolves the
-client metadata, renders consent, then on approval mints an
-authorization code bound to the client's DPoP key and PKCE challenge.
-
-🚧 **`/oauth/par` (Pushed Authorization Requests).** Atproto OAuth
-*requires* PAR — clients can't pass authorize parameters in the browser
-URL. PAR is the back-channel handoff where the client POSTs the full
-parameter set and gets an opaque `request_uri` short-TTL handle.
-
-🚧 **Client metadata fetching and validation.** Every OAuth client
-identifies itself with a `client_id` URL that points at a JSON metadata
-document. The AS fetches that document, validates its shape (redirect
-URIs, scopes, DPoP-required, ...), and only allows clients whose
-metadata matches the request. Today we have nothing here.
-
-🚧 **PKCE verification.** Authorization codes will be bound to a
-`code_challenge` the client posts via PAR; redemption requires the
-client to present the matching `code_verifier`. Code lives nowhere yet
-because authorize is unimplemented.
 
 🚧 **`requireOauthAccess` middleware.** The chapter-13 middleware in
 `src/pds/auth/middleware.ts` validates HS256 access tokens. The parallel
@@ -396,22 +551,15 @@ session.
 deploys need a shared cache (Redis) or accept the small replay window
 across processes as a manageable risk.
 
-🚧 **Authorization-code lifetime + rotation policy.** When authorize
-ships, codes need a short TTL (30–60 seconds) and a one-use lifetime.
-We'll re-use the same `refresh_tokens`-style row pattern.
-
 ## Try it
 
-This walkthrough mints an OAuth refresh token *cross-protocol* — through
-the chapter-13 password login — because `/oauth/authorize` isn't here
-yet. Real clients will go through the OAuth front door once it ships.
-
-You'll need `jq` and `openssl`.
+The end-to-end flow — DPoP keypair, PAR push, consent-page sign-in, token
+redemption — is in the "Run it locally" section above. The shorter
+"poke the discovery surface" variant:
 
 ```bash
 # 0. Generate a PDS OAuth signing key, if you haven't already.
 export PDS_OAUTH_SIGNING_KEY=$(openssl rand -hex 32)
-
 # Restart `pnpm dev` so the new env var is picked up.
 
 # 1. Inspect the discovery doc.
@@ -422,30 +570,12 @@ curl -s http://localhost:3000/oauth/jwks | jq
 
 # 3. Inspect the protected-resource metadata.
 curl -s http://localhost:3000/.well-known/oauth-protected-resource | jq
-
-# 4. Create a chapter-13 session (we'll bridge to OAuth from here).
-curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createSession \
-  -H 'content-type: application/json' \
-  -d '{"identifier":"alice.test","password":"correcthorsebatterystaple"}' | jq
-
-# 5. The fixture path: mint a DPoP keypair + an OAuth refresh token tied
-#    to it. There's no XRPC endpoint for this — it's a fixture-only call
-#    intended for use until /oauth/authorize ships.
-#
-#    See tests under `tests/oauth/` (added by the test-author session)
-#    for a worked example that does steps 5–7 in one node script.
 ```
 
-The end-to-end refresh exchange — DPoP keypair, signed proof, POST to
-`/oauth/token` — is best done from a script rather than `curl`, because
-the DPoP proof has to be re-signed for each call. The shape, roughly:
+The refresh-only path (assuming you already have a refresh token from
+the authorization-code flow) looks like:
 
 ```ts
-// Once.
-import { generateKeyPair, exportJWK, SignJWT, calculateJwkThumbprint } from 'jose'
-const { privateKey, publicKey } = await generateKeyPair('ES256')
-const dpopJwk = await exportJWK(publicKey)
-
 // Per request.
 async function dpopProof(method: string, url: string): Promise<string> {
   return new SignJWT({
@@ -458,7 +588,6 @@ async function dpopProof(method: string, url: string): Promise<string> {
     .sign(privateKey)
 }
 
-// And then:
 const proof = await dpopProof('POST', 'http://localhost:3000/oauth/token')
 const res = await fetch('http://localhost:3000/oauth/token', {
   method: 'POST',
@@ -477,8 +606,8 @@ const { access_token, refresh_token, expires_in } = await res.json()
 
 On success: a fresh DPoP-bound access JWT and a rotated refresh JWT.
 Decode the access token (the middle base64url segment) and you'll see
-the `cnf.jkt` claim — that's the thumbprint of the DPoP key you just
-generated.
+the `cnf.jkt` claim — that's the thumbprint of the DPoP key you
+generated up front.
 
 ## Exercises
 
