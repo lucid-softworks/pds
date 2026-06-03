@@ -302,10 +302,11 @@ this implementation deliberately left untouched:
   full OAuth flow. The shape is in
   [the OAuth spec](https://atproto.com/specs/oauth); the implementation
   is a chapter of its own.
-- **Account migration.** `requestAccountMigrate` plus the matching PLC op
-  rotation lets a user move from one PDS to another without losing their
-  identity. The pieces are in this codebase; the gluing-together is a
-  future session.
+- **Account migration.** The cross-PDS handoff that lets a user pick up
+  their DID and repo and move hosts. Implemented in
+  [chapter 20](./20-migration.md) — the four new endpoints, the schema
+  changes, and the gaps still open (notably `createAccount` accepting a
+  pre-existing DID).
 - **App passwords.** Headless clients (CLIs, bots, archival scripts)
   authenticate with credentials separate from the main password, with
   scope restrictions. The schema column exists; the flow doesn't yet.

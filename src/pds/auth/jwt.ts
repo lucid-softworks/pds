@@ -28,6 +28,7 @@ export type RefreshClaims = JWTPayload & {
 
 const ACCESS_TTL_SECONDS = 2 * 60 * 60 // 2 hours
 const REFRESH_TTL_SECONDS = 60 * 24 * 60 * 60 // 60 days
+const SERVICE_TTL_SECONDS = 60 // cross-PDS auth — keep this tight
 
 export async function signAccessToken(did: string): Promise<{
   jwt: string
@@ -72,6 +73,49 @@ export async function signRefreshToken(did: string): Promise<{
     .setIssuedAt(iat)
     .setExpirationTime(exp)
     .sign(cfg.jwtSecret)
+  return { jwt, jti, exp }
+}
+
+export type ServiceClaims = JWTPayload & {
+  iss: string // the user DID
+  aud: string // the target service DID
+  lxm?: string // method NSID this token is scoped to
+  jti: string
+}
+
+/** Mint a short-lived service token authorizing one DID's session to talk
+ *  to another service (typically: the migrating user authorizing the new PDS
+ *  to call `getRepo` on the old one).
+ *
+ *  ⚠️ The atproto spec uses ES256K signatures with the user's signing key so
+ *  the receiver verifies against the user's DID document. We sign with HS256
+ *  using the shared PDS_JWT_SECRET — fine for self-issued tokens this PDS
+ *  also verifies, useless across the network. Chapter 20 covers the
+ *  divergence. */
+export async function signServiceToken(args: {
+  did: string
+  aud: string
+  lxm?: string
+  expiresInSeconds?: number
+}): Promise<{ jwt: string; jti: string; exp: number }> {
+  const cfg = getConfig()
+  const ttl = Math.min(
+    Math.max(1, args.expiresInSeconds ?? SERVICE_TTL_SECONDS),
+    SERVICE_TTL_SECONDS,
+  )
+  const jti = randomJti()
+  const iat = Math.floor(Date.now() / 1000)
+  const exp = iat + ttl
+  const builder = new SignJWT({
+    ...(args.lxm ? { lxm: args.lxm } : {}),
+  })
+    .setProtectedHeader({ alg: 'HS256', typ: 'at+jwt' })
+    .setIssuer(args.did)
+    .setAudience(args.aud)
+    .setJti(jti)
+    .setIssuedAt(iat)
+    .setExpirationTime(exp)
+  const jwt = await builder.sign(cfg.jwtSecret)
   return { jwt, jti, exp }
 }
 

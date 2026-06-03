@@ -363,4 +363,5 @@ before exposing it to a public network:
    column, or somewhere else?
 
 ← [18 — Production](./18-production.md) ·
+[20 — Migration](./20-migration.md) ·
 [Table of contents](./README.md)

@@ -44,6 +44,10 @@ export const accounts = pgTable(
     // confirmEmail, cleared by updateEmail so the new address is reconfirmed.
     // See chapter 13 — Authentication.
     emailConfirmedAt: timestamp('email_confirmed_at', { withTimezone: true }),
+    // 'none' | 'migrating-out' | 'migrating-in'. Tracks where the account is
+    // in a cross-PDS move so the firehose can distinguish a migration commit
+    // from an ordinary one. See chapter 20 — Migration.
+    migrationState: text('migration_state').default('none').notNull(),
   },
   (t) => ({
     handleIdx: uniqueIndex('accounts_handle_idx').on(t.handle),
