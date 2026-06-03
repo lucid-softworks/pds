@@ -36,7 +36,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -48,5 +48,10 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Build
-        run: pnpm vite build
+      - name: Production-build smoke test
+        # `scripts/ci-prod-smoke.sh` runs `pnpm build` (vite + esbuild),
+        # spins the prod entry against a fresh PGlite, and asserts a
+        # canonical set of endpoints serve 200. Catches regressions like
+        # the lexicon-bundling / dot-directory-routing misses that this
+        # script was written to surface.
+        run: ./scripts/ci-prod-smoke.sh
