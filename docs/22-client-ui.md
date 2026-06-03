@@ -1,4 +1,4 @@
-# Chapter 22 — A minimal client UI
+# A minimal client UI
 
 So far in this book the PDS has been a server you talk to with `curl`. That's
 a deliberate choice — XRPC is just HTTP + JSON, and the second you wrap it in

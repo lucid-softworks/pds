@@ -83,7 +83,7 @@ export function getConfig(): PdsConfig {
     blobStoreKind,
     blobStoreDir: required('BLOB_DIR', './.blobs'),
     adminPasswordHash,
-    inviteRequired: process.env.PDS_INVITE_REQUIRED === 'true',
+    inviteRequired: process.env.PDS_INVITE_REQUIRED !== 'false',
     oauthSigningKey,
     logLevel: resolveLogLevel(),
     metricsEnabled: process.env.PDS_METRICS === 'true',

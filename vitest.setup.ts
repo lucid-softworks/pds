@@ -26,6 +26,9 @@ process.env.PDS_LOG_PRETTY ??= 'false'
 process.env.PDS_JWT_SECRET ??=
   '0'.repeat(64)
 process.env.BLOB_DIR ??= mkdtempSync(join(tmpdir(), 'pds-test-blobs-'))
+// Tests exercise createAccount without invite codes; the deployable default
+// is invite-required, but the test suite is its own closed world.
+process.env.PDS_INVITE_REQUIRED ??= 'false'
 // Default DATABASE_URL points at a unique pglite directory so tests that
 // touch `~/lib/db` without overriding it still get a private DB. Tests
 // that need migrations applied call `setupTestDbEnv()` from tests/db.ts.
