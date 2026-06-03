@@ -68,8 +68,35 @@ scripts/demo.sh
 
 - `pnpm typecheck` — must stay clean.
 - `pnpm vite build` — must produce a server bundle.
-- `scripts/demo.sh` — must succeed end-to-end. If your change adds a new
-  endpoint, add a step to the demo.
+- `pnpm test` — must stay green. New subsystems get test files in
+  `src/pds/<subsystem>/*.test.ts`; cross-subsystem flows go in
+  `tests/integration/`.
+- `scripts/demo.sh` — must succeed end-to-end (it runs against a live
+  `pnpm dev`). If your change adds a new endpoint, add a step to the demo.
+
+CI runs all four on every push via `.github/workflows/ci.yml`.
+
+## Writing tests
+
+The harness is vitest with `pool: 'forks'` so each test file gets a worker.
+For tests that touch the database:
+
+```ts
+import { setupTestDbEnv, migrateProcessDb } from '../../tests/db'
+
+// Call BEFORE any import of ~/lib/db — sets DATABASE_URL to a unique
+// pglite tmp path so each test file gets a fresh DB.
+setupTestDbEnv()
+
+import { beforeAll, ... } from 'vitest'
+beforeAll(async () => {
+  await migrateProcessDb()
+})
+```
+
+Read `tests/integration/account-lifecycle.test.ts` for the integration-test
+shape. Unit tests for a pure subsystem (codec, mst, car, jwt, etc.) don't
+need the DB at all and can skip the setup.
 
 ## Commits
 
