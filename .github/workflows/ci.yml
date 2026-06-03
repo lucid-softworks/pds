@@ -17,11 +17,14 @@ jobs:
       # so the config validator is happy without exposing real secrets. Same
       # convention as vitest.setup.ts — 64 zero hex chars for the symmetric
       # secrets, 64 zero hex chars (32 bytes) for the OAuth signing scalar.
-      PDS_PUBLIC_URL: http://localhost:3000
-      PDS_HOSTNAME: localhost
-      PDS_JWT_SECRET: 0000000000000000000000000000000000000000000000000000000000000000
-      PDS_OAUTH_SIGNING_KEY: 0000000000000000000000000000000000000000000000000000000000000000
-      DATABASE_URL: pglite
+      # NOTE: keep the hex strings quoted — YAML otherwise parses a bare
+      # run of zeros as integer 0 and the env arrives as "0", which fails
+      # config.ts's length-64 check.
+      PDS_PUBLIC_URL: "http://localhost:3000"
+      PDS_HOSTNAME: "localhost"
+      PDS_JWT_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
+      PDS_OAUTH_SIGNING_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      DATABASE_URL: "pglite"
 
     steps:
       - uses: actions/checkout@v4
