@@ -160,6 +160,25 @@ The handful of places that need wiring, all of which now ship:
 > run it. If you want independence, mirror the directory's data locally
 > and serve from there; coordinate with the broader ecosystem.
 
+### Overriding the directory URL
+
+`PDS_PLC_DIRECTORY_URL` overrides the default `https://plc.directory`.
+Useful for two scenarios:
+
+1. **Pointing at a self-hosted PLC mirror.** Set it to your mirror's
+   public URL once you've mirrored the directory's data and replicated
+   the API surface.
+2. **Testing the publish path end-to-end.** The CI suite runs
+   `tests/integration/plc-directory.test.ts` against a tiny
+   `http.createServer` mock that follows the directory's contract:
+   POSTs to `/<did>` get a 200, and the test verifies the wire body
+   includes the right `type`, `sig`, `verificationMethods`,
+   `rotationKeys`, and `services.atproto_pds.endpoint`. The same test
+   exercises the retry-on-5xx path, the 409-as-idempotent-success
+   path, and the 400-surfaces-as-InvalidRequest path. That coverage
+   means our publish wiring stays correct without depending on real
+   plc.directory network access in CI.
+
 ## Blob storage
 
 `BLOB_STORE=s3` (when implemented) plus standard AWS env vars and a

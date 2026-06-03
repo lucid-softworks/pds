@@ -13,7 +13,17 @@ import type { DidDocument } from './document'
 import type { SignedPlcOp } from './plc'
 import { BadRequest } from '~/pds/xrpc/errors'
 
-const PLC_DIRECTORY = 'https://plc.directory'
+const DEFAULT_PLC_DIRECTORY = 'https://plc.directory'
+
+function plcDirectoryUrl(): string {
+  // PDS_PLC_DIRECTORY_URL overrides the default. Useful for self-hosted PLC
+  // mirrors (chapter 18) and for the mock-directory integration test.
+  const override = process.env.PDS_PLC_DIRECTORY_URL
+  if (override && override.length > 0) {
+    return override.replace(/\/$/, '')
+  }
+  return DEFAULT_PLC_DIRECTORY
+}
 
 /** POST a signed PLC op to plc.directory. No-op when `localPlcOnly`.
  *
@@ -33,7 +43,7 @@ export async function publishPlcOp(args: {
   // with 400 and we surface the body for debugging.
   const signed = await decode<SignedPlcOp>(args.signedOpBytes)
   const body = JSON.stringify(signed)
-  const url = `${PLC_DIRECTORY}/${encodeURIComponent(args.did)}`
+  const url = `${plcDirectoryUrl()}/${encodeURIComponent(args.did)}`
 
   await postWithOneRetry(url, body)
 }
@@ -105,7 +115,7 @@ function isRetryable(err: unknown): boolean {
  *  on 404 so the resolver can negative-cache the miss. Throws on transport
  *  or unexpected upstream errors so the caller can retry. */
 export async function fetchPlcDoc(did: string): Promise<DidDocument | null> {
-  const url = `${PLC_DIRECTORY}/${encodeURIComponent(did)}`
+  const url = `${plcDirectoryUrl()}/${encodeURIComponent(did)}`
   const res = await fetch(url, {
     headers: { accept: 'application/did+ld+json, application/json' },
   })
