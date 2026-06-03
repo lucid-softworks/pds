@@ -18,7 +18,7 @@ import { z } from 'zod'
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest } from '../errors'
 import { db } from '~/lib/db'
-import { reservedKeys } from '~/lib/db/schema/migration'
+import { reservedKeys } from '~/lib/db/schema'
 import { generateKeypair } from '~/pds/repo/keys'
 import { optionalAccessAuth } from '~/pds/auth/middleware'
 
