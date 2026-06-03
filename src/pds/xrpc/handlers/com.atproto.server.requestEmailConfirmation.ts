@@ -8,11 +8,15 @@
 
 import { eq } from 'drizzle-orm'
 import type { Handler, HandlerDef } from '../server'
+import { getConfig } from '~/lib/config'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { issueEmailToken } from '~/pds/auth/email'
-import { sendEmail } from '~/pds/auth/email_sender'
+import {
+  renderTransactionalEmailHtml,
+  sendEmail,
+} from '~/pds/auth/email_sender'
 
 const handler: Handler = async ({ authorization, dpopProof, request }) => {
   const me = await requireAuthWithScope(
@@ -34,13 +38,22 @@ const handler: Handler = async ({ authorization, dpopProof, request }) => {
     did: me.did,
     purpose: 'confirm-email',
   })
+  const brand = getConfig().hostname
+  const subject = 'Confirm your email address'
+  const intro =
+    'Enter this code in your Bluesky client to confirm your email address.'
+  const outro = 'This code expires in 24 hours.'
   await sendEmail({
     to: acct.email,
-    subject: 'Confirm your email address',
-    body:
-      'Use this code to confirm your email address:\n\n' +
-      `    ${token}\n\n` +
-      'This code expires in 24 hours.',
+    subject,
+    body: `${intro}\n\n    ${token}\n\n${outro}`,
+    html: renderTransactionalEmailHtml({
+      title: subject,
+      intro,
+      code: token,
+      outro,
+      brand,
+    }),
   })
   return undefined
 }

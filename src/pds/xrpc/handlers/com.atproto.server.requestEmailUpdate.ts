@@ -12,9 +12,13 @@
 import { z } from 'zod'
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest } from '../errors'
+import { getConfig } from '~/lib/config'
 import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { issueEmailToken } from '~/pds/auth/email'
-import { sendEmail } from '~/pds/auth/email_sender'
+import {
+  renderTransactionalEmailHtml,
+  sendEmail,
+} from '~/pds/auth/email_sender'
 
 const InputSchema = z.object({
   email: z.string().min(1),
@@ -45,14 +49,23 @@ const handler: Handler = async ({ input, authorization, dpopProof, request }) =>
   })
   // Verification goes to the *new* address — proves the user controls it
   // before we move the account over.
+  const brand = getConfig().hostname
+  const subject = 'Confirm your new email address'
+  const intro =
+    'Enter this code to finish switching your account to this email address.'
+  const outro =
+    "This code expires in 24 hours. If you didn't ask to change your email, you can safely ignore this message."
   await sendEmail({
     to: newEmail,
-    subject: 'Confirm your new email address',
-    body:
-      'Use this code to switch your account to this email address:\n\n' +
-      `    ${token}\n\n` +
-      'This code expires in 24 hours. If you did not request this change, ' +
-      'you can ignore this message.',
+    subject,
+    body: `${intro}\n\n    ${token}\n\n${outro}`,
+    html: renderTransactionalEmailHtml({
+      title: subject,
+      intro,
+      code: token,
+      outro,
+      brand,
+    }),
   })
   return undefined
 }

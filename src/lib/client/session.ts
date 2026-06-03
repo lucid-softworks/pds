@@ -10,6 +10,8 @@
 // security downgrade vs. an httpOnly cookie. It also keeps the example
 // dependency-free — no cookie helper, no SSR session reads.
 
+import { useEffect, useState } from 'react'
+
 export type Session = {
   did: string
   handle: string
@@ -75,4 +77,21 @@ export async function logout(): Promise<void> {
   } catch {
     // network errors on logout are non-fatal — the local state is gone.
   }
+}
+
+/** Hook for use inside a React component. Returns `null` on the SSR pass
+ *  AND on the first client render, then flips to the stored session after
+ *  `useEffect` runs. Without this, components that branch on
+ *  `getSession()` at the top level differ between SSR (no `localStorage`)
+ *  and the client hydration (session present) — React then throws #418
+ *  for the hydration mismatch.
+ *
+ *  Use this in any client-only `/app/*` page that conditionally renders
+ *  based on whether the user is logged in. */
+export function useClientSession(): Session | null {
+  const [session, setSession] = useState<Session | null>(null)
+  useEffect(() => {
+    setSession(getSession())
+  }, [])
+  return session
 }

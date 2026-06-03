@@ -7,7 +7,7 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { AppNav } from '~/components/app/AppNav'
 import { ComposeForm } from '~/components/app/ComposeForm'
-import { getSession } from '~/lib/client/session'
+import { getSession, useClientSession } from '~/lib/client/session'
 
 export const Route = createFileRoute('/app/compose')({
   beforeLoad: () => {
@@ -20,7 +20,8 @@ export const Route = createFileRoute('/app/compose')({
 })
 
 function ComposePage() {
-  const session = getSession()
+  // See feed.tsx for the SSR + hydration rationale.
+  const session = useClientSession()
   if (!session) return null
   return (
     <>

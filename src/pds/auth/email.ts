@@ -104,10 +104,19 @@ export async function consumeEmailTokenByToken(
   purpose: EmailPurpose,
   token: string,
 ): Promise<EmailToken> {
+  // Be lenient on what we accept: bsky.app's reset-password UI sometimes
+  // uppercases the input as the user types and pastes can pick up
+  // surrounding whitespace. Our generator only emits lowercase + hyphen,
+  // so normalising on read costs nothing and the user gets a working
+  // reset on the first try instead of staring at "invalid or expired"
+  // for typing the same code they were emailed.
+  const normalized = token.trim().toLowerCase()
   const rows = await db
     .select()
     .from(emailTokens)
-    .where(and(eq(emailTokens.token, token), eq(emailTokens.purpose, purpose)))
+    .where(
+      and(eq(emailTokens.token, normalized), eq(emailTokens.purpose, purpose)),
+    )
     .limit(1)
   const row = rows[0]
   if (!row) {
@@ -130,10 +139,14 @@ export async function purgeExpiredEmailTokens(): Promise<void> {
 function generateToken(): string {
   // bsky.app's reset-password / email-confirm UIs regex-validate the token
   // as `XXXXX-XXXXX` before submitting (and the same shape is what the
-  // official PDS issues). We match: 8 random bytes → 13 base32 chars,
-  // slice the first 10, split 5+5. ~50 bits of entropy is fine for a
-  // 1-hour single-use token.
-  const raw = base32(randomBytes(8)).slice(0, 10)
+  // official PDS issues). The form usually shows the field in caps to
+  // signal "this is a code, not free text", so we emit uppercase to match
+  // what the user will retype. The `consumeEmailTokenByToken` lookup
+  // normalises to lowercase, so the stored row stays in a canonical case
+  // either way.
+  // 8 random bytes → 13 base32 chars, slice the first 10, split 5+5.
+  // ~50 bits of entropy is fine for a 1-hour single-use token.
+  const raw = base32(randomBytes(8)).slice(0, 10).toUpperCase()
   return `${raw.slice(0, 5)}-${raw.slice(5, 10)}`
 }
 

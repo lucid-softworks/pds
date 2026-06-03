@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react'
 import { createFileRoute, redirect, Link } from '@tanstack/react-router'
 import { AppNav } from '~/components/app/AppNav'
 import { PostCard, type PostRecord } from '~/components/app/PostCard'
-import { getSession } from '~/lib/client/session'
+import { getSession, useClientSession } from '~/lib/client/session'
 import { xrpcCall, XrpcError } from '~/lib/client/xrpc'
 
 export const Route = createFileRoute('/app/feed')({
@@ -33,7 +33,12 @@ type ListRecordsResponse = {
 }
 
 function FeedPage() {
-  const session = getSession()
+  // `useClientSession` keeps SSR + first-client-render in lockstep (both
+  // see `null`), then re-renders with the localStorage session after
+  // mount. Calling `getSession()` directly here would cause React #418
+  // because the server-rendered HTML wouldn't match the client's first
+  // pass — see src/lib/client/session.ts.
+  const session = useClientSession()
   const [posts, setPosts] = useState<PostRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 

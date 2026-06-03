@@ -11,10 +11,14 @@ import { z } from 'zod'
 import { eq } from 'drizzle-orm'
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest } from '../errors'
+import { getConfig } from '~/lib/config'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { issueEmailToken } from '~/pds/auth/email'
-import { sendEmail } from '~/pds/auth/email_sender'
+import {
+  renderTransactionalEmailHtml,
+  sendEmail,
+} from '~/pds/auth/email_sender'
 
 const InputSchema = z.object({
   email: z.string().min(1),
@@ -43,14 +47,23 @@ const handler: Handler = async ({ input }) => {
     did: acct.did,
     purpose: 'reset-password',
   })
+  const brand = getConfig().hostname
+  const subject = 'Reset your password'
+  const intro =
+    'Enter this code to reset the password on your account. It expires in 1 hour.'
+  const outro =
+    "If you didn't ask for a password reset, you can safely ignore this email."
   await sendEmail({
     to: acct.email,
-    subject: 'Reset your password',
-    body:
-      'Use this code to reset your password:\n\n' +
-      `    ${token}\n\n` +
-      'This code expires in 1 hour. If you did not request a password reset, ' +
-      'you can ignore this message.',
+    subject,
+    body: `${intro}\n\n    ${token}\n\n${outro}`,
+    html: renderTransactionalEmailHtml({
+      title: subject,
+      intro,
+      code: token,
+      outro,
+      brand,
+    }),
   })
   return undefined
 }
