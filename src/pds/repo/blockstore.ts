@@ -13,9 +13,23 @@ import type { Block } from '~/pds/codec'
 
 export type StoredBlock = Block
 
-/** Store a single block for a repo, idempotently. */
-export async function putBlock(repoDid: string, block: Block): Promise<void> {
-  await db
+// Minimal subset of Drizzle's db / tx surface that putBlocks + putBlock use,
+// so callers in a `db.transaction(tx => …)` can thread `tx` through instead
+// of writing outside the open transaction. Doing the latter deadlocks on
+// single-connection drivers like PGlite (the tx holds the write lock while
+// the outside-tx write waits on it forever).
+type WriteSurface = {
+  insert: typeof db.insert
+}
+
+/** Store a single block for a repo, idempotently. Pass `tx` when called from
+ *  inside a `db.transaction` callback. */
+export async function putBlock(
+  repoDid: string,
+  block: Block,
+  handle: WriteSurface = db,
+): Promise<void> {
+  await handle
     .insert(repoBlocks)
     .values({
       repoDid,
@@ -26,10 +40,15 @@ export async function putBlock(repoDid: string, block: Block): Promise<void> {
     .onConflictDoNothing()
 }
 
-/** Store multiple blocks for a repo, idempotently. */
-export async function putBlocks(repoDid: string, blocks: Block[]): Promise<void> {
+/** Store multiple blocks for a repo, idempotently. Pass `tx` when called from
+ *  inside a `db.transaction` callback (see `putBlock` above). */
+export async function putBlocks(
+  repoDid: string,
+  blocks: Block[],
+  handle: WriteSurface = db,
+): Promise<void> {
   if (blocks.length === 0) return
-  await db
+  await handle
     .insert(repoBlocks)
     .values(
       blocks.map((b) => ({

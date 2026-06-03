@@ -35,7 +35,7 @@ import {
   isReservedTld,
   InvalidHandleError,
 } from '~/pds/did/handle'
-import { createLocalPlc } from '~/pds/did/plc'
+import { buildGenesisPlc, persistGenesisPlc } from '~/pds/did/plc'
 import { encode } from '~/pds/codec'
 import { hashPassword } from '~/pds/auth/password'
 import { createSessionTokens } from '~/pds/auth/session'
@@ -102,20 +102,26 @@ export async function createAccount(
   const signingKey = generateKeypair()
   const rotationKey = generateKeypair()
 
-  // ── 4. Build + sign the genesis PLC op locally, derive the DID ─────────
-  const { did } = await createLocalPlc({
+  // ── 4. Build + sign the genesis PLC op IN MEMORY. We derive the DID from
+  //      the signed bytes, but we hold off on the plc_operations INSERT until
+  //      the accounts row is in — plc_operations.did has an immediate FK to
+  //      accounts.did and would otherwise reject. The op is signed and the
+  //      DID is final at this point regardless of when it gets persisted.
+  const plc = await buildGenesisPlc({
     handle: input.handle,
     rotationKeyPriv: rotationKey.privateKeyHex,
     rotationKeyDidKey: rotationKey.didKey,
     signingKeyDidKey: signingKey.didKey,
     pdsEndpoint: cfg.publicUrl,
   })
+  const did = plc.did
 
   try {
     // ── 5. Hash password ─────────────────────────────────────────────────
     const passwordHash = await hashPassword(input.password)
 
-    // ── 6. Insert account row ────────────────────────────────────────────
+    // ── 6. Insert account row FIRST. Once this lands the FK in
+    //      plc_operations is satisfied, so step 6c can write the PLC log.
     await db.insert(accounts).values({
       did,
       handle: input.handle,
@@ -126,6 +132,9 @@ export async function createAccount(
       rotationKeyPriv: rotationKey.privateKeyHex,
       rotationKeyPub: rotationKey.publicKeyMultibase,
     })
+
+    // ── 6a. Persist the genesis PLC op (FK now satisfied).
+    await persistGenesisPlc({ did, signedBlock: plc.signedBlock })
 
     // ── 6b. Consume the invite code ─────────────────────────────────────
     // Done after the account row lands so that the audit log can name a

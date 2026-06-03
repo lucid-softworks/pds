@@ -53,11 +53,14 @@ export type GenesisResult = {
   signedOpBytes: Uint8Array
 }
 
-/** Build, sign, and locally persist a genesis PLC operation. Returns the
- *  resulting DID. */
-export async function createLocalPlc(
+/** Build + sign a genesis PLC operation in memory. The DID is the hash of
+ *  the signed bytes, so we can derive it without touching the database. The
+ *  caller is expected to call `persistGenesisPlc` after the matching account
+ *  row has been inserted — plc_operations.did → accounts.did is an FK that
+ *  rejects unbacked PLC rows. */
+export async function buildGenesisPlc(
   input: GenesisInput,
-): Promise<GenesisResult> {
+): Promise<GenesisResult & { signedBlock: { cid: string; bytes: Uint8Array } }> {
   const unsigned: UnsignedPlcOp = {
     type: 'plc_operation',
     rotationKeys: [input.rotationKeyDidKey],
@@ -83,14 +86,43 @@ export async function createLocalPlc(
   const hash = sha256(signedBlock.bytes)
   const did = 'did:plc:' + base32.baseEncode(hash).slice(0, 24)
 
-  await db.insert(plcOperations).values({
+  return {
     did,
-    cid: signedBlock.cid.toString(),
-    operation: signedBlock.bytes,
+    signedOp: signed,
+    signedOpBytes: signedBlock.bytes,
+    signedBlock: {
+      cid: signedBlock.cid.toString(),
+      bytes: signedBlock.bytes,
+    },
+  }
+}
+
+/** Persist a genesis PLC op. Call AFTER the accounts row is inserted so the
+ *  FK from plc_operations.did → accounts.did is satisfied. */
+export async function persistGenesisPlc(args: {
+  did: string
+  signedBlock: { cid: string; bytes: Uint8Array }
+}): Promise<void> {
+  await db.insert(plcOperations).values({
+    did: args.did,
+    cid: args.signedBlock.cid,
+    operation: args.signedBlock.bytes,
     seq: 0,
   })
+}
 
-  return { did, signedOp: signed, signedOpBytes: signedBlock.bytes }
+/** Back-compat wrapper for the old name. Builds the op AND persists in one
+ *  call — only safe when the caller already has an accounts row in place. */
+export async function createLocalPlc(
+  input: GenesisInput,
+): Promise<GenesisResult> {
+  const built = await buildGenesisPlc(input)
+  await persistGenesisPlc({ did: built.did, signedBlock: built.signedBlock })
+  return {
+    did: built.did,
+    signedOp: built.signedOp,
+    signedOpBytes: built.signedOpBytes,
+  }
 }
 
 function base64url(bytes: Uint8Array): string {

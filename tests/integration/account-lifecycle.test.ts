@@ -11,24 +11,12 @@
 // Reads use direct drizzle queries against the records table (the same
 // table the read-side XRPC handlers consult), avoiding any HTTP coupling.
 //
-// ─── KNOWN BUG (skipping the whole suite) ─────────────────────────────
-//
-// The current `createAccount` orchestration inserts a `plc_operations` row
-// (inside `createLocalPlc`) BEFORE inserting the `accounts` row, which
-// violates the FK `plc_operations.did → accounts.did`. Migration 0000
-// declares the FK immediate, so every fresh-account create fails with:
-//
-//   error: insert or update on table "plc_operations" violates foreign
-//   key constraint "plc_operations_did_fkey"
-//
-// This is a real bug — not a test artifact. The fix is to reorder
-// `createAccount` (insert the account row before the PLC op) or make the
-// FK DEFERRABLE INITIALLY DEFERRED in migration 0000. Per the task
-// instructions we leave the offending tests as `.skip` so the suite is
-// green; the coordinator should pick this up.
-//
-// TODO(coordinator): fix createAccount ordering OR defer the
-// plc_operations FK. Re-enable this suite after either lands.
+// (The FK-ordering bug this test originally surfaced was fixed by splitting
+// did:plc creation into `buildGenesisPlc` (pure) + `persistGenesisPlc` (DB),
+// and reordering `createAccount` to INSERT the accounts row first. A second
+// issue — `putBlocks` writing outside the records-table transaction and
+// deadlocking PGlite's single connection — was fixed by threading the tx
+// handle through `putBlock` / `putBlocks`.)
 
 import { setupTestDbEnv, migrateProcessDb } from '../db'
 
@@ -71,7 +59,7 @@ describe('test harness sanity', () => {
 
 // See file header — skipped pending a fix to createAccount's insert order.
 // eslint-disable-next-line vitest/no-disabled-tests
-describe.skip('end-to-end account lifecycle (BLOCKED: see header)', () => {
+describe('end-to-end account lifecycle', () => {
   const handle = `alice-${Date.now()}.example.com`
   const email = `alice-${Date.now()}@example.test`
   const password = 'correct horse battery staple'

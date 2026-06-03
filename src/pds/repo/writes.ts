@@ -310,7 +310,12 @@ async function persistCommit(handle: WriteHandle, args: PersistArgs): Promise<vo
   // Dedup blocks by CID — the MST may revisit the same untouched subtree.
   const dedup = new Map<string, Block>()
   for (const b of args.blocks) dedup.set(b.cid.toString(), b)
-  await putBlocks(args.did, [...dedup.values()])
+  // Pass the open tx (or the bare db, for the no-transaction fallback) so the
+  // block-store insert lands in the same connection as the records-table
+  // mutations. Mixing in a write through the global `db` proxy here would
+  // deadlock on single-connection drivers (PGlite holds the tx lock while
+  // the outside write waits on it).
+  await putBlocks(args.did, [...dedup.values()], handle)
 
   await handle
     .update(repos)
