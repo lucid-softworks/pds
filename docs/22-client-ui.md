@@ -169,6 +169,99 @@ Read this as a list of self-contained side quests:
 - **OAuth login as an alternative** — flip the login form into an "Authorize
   with your PDS" button that kicks off the OAuth flow from chapter 21.
 
+## Adding images
+
+The "what's on your mind" form ships with image attachments. They're the
+smallest possible step up from text-only posts and they exercise a piece of
+the protocol the rest of the chapter never touches: blobs.
+
+There are exactly two endpoints involved:
+
+- `com.atproto.repo.uploadBlob` — POST raw bytes, get a blob ref back. The
+  Content-Type header is the file's MIME type (image/jpeg, image/png,
+  image/webp); the body is the file as-is. No JSON envelope, no multipart
+  wrapping. The response is `{ blob: { $type: 'blob', ref: { $link: '<cid>' },
+  mimeType, size } }`. Chapter 15 covers the storage side; here the client
+  just cares about the shape it gets back.
+- `com.atproto.sync.getBlob` — GET `?did=<owner-did>&cid=<blob-cid>`. Public,
+  unauthenticated, streams the bytes with the stored Content-Type. The
+  feed's `<img src>` points straight at this URL.
+
+The blob ref shape is worth pausing on. Inside the post record, an image
+attachment is **not** a URL — it's a structural reference:
+
+```json
+{
+  "$type": "blob",
+  "ref": { "$link": "bafkreigh2ak..." },
+  "mimeType": "image/jpeg",
+  "size": 124512
+}
+```
+
+The `$type: "blob"` and `ref: { $link }` are how the lexicon encodes a CID
+link. In CBOR that's tag 42 around the binary CID; in JSON it's the `$link`
+object. The record validator (chapter 9) checks that any field declared
+`"type": "blob"` in the lexicon receives exactly this shape, and the
+records writer (chapter 14 / wave 4B) then unpacks each `$link` and inserts
+a row into `record_blobs` linking the post URI to the blob CID. That
+attachment row is what keeps the blob from being garbage-collected (chapter
+15) once an unreferenced upload ages out.
+
+The `embed` field on `app.bsky.feed.post` is a lexicon **union**: it can be
+`app.bsky.embed.images`, `app.bsky.embed.external`, or `app.bsky.embed.record`.
+A union in atproto is discriminated by `$type` on the wire — that's why the
+record carries `embed.$type` and the validator picks which schema to apply
+based on it. For images:
+
+```json
+{
+  "embed": {
+    "$type": "app.bsky.embed.images",
+    "images": [
+      { "image": { "$type": "blob", "ref": { "$link": "..." }, ... }, "alt": "..." }
+    ]
+  }
+}
+```
+
+The cap is 4 images per post (the lexicon's `maxLength`), and each image
+has its own `image` blob + `alt` text. The client enforces 1 MB per image,
+which is **lower** than the server's `uploadBlob` cap of 5 MB. Two reasons:
+the `app.bsky.embed.images` lexicon's `image.maxSize` is exactly
+`1_000_000`, so a 5 MB blob would upload fine but then the `createRecord`
+call would fail lexicon validation; and real Bluesky compresses to ~1 MB
+before upload anyway, so matching that keeps the example honest about what
+production-shaped traffic looks like. Without an image-processing library
+(sharp, jimp) the client can't transcode, so it just rejects oversize
+files at the picker.
+
+### Why this client only renders images
+
+`app.bsky.embed.images` is the one embed variant whose data lives entirely
+inside the PDS: the bytes are in our blob store, the metadata is in the
+record, and we can build a `getBlob` URL from the post's own DID and the
+embed's CID. We have everything we need.
+
+The other variants are AppView-shaped:
+
+- `app.bsky.embed.record` quotes another record by AT-URI. Rendering it
+  requires fetching the target record — usually from a *different* PDS —
+  resolving its author's handle and avatar, and recursing into its own
+  embeds. That's a cross-account, federated graph traversal; it's what an
+  AppView is built for (chapter 17).
+- `app.bsky.embed.external` is a link card with a stored thumbnail blob.
+  We could render the thumb (it's a blob like any other), but the title /
+  description text isn't authoritative on the PDS — the standard practice
+  is to re-scrape on the AppView side. A teaching PDS client showing
+  half-implemented link cards would be more confusing than skipping them.
+- `app.bsky.embed.video` needs a video player and HLS-style segmented
+  variants the PDS doesn't produce.
+
+So the feed renders a small monochrome "unknown embed: app.bsky.embed.X"
+badge for anything that isn't images. The reader sees that the record
+*has* an embed and what kind, without us pretending to render it.
+
 ## Try it
 
 ```bash

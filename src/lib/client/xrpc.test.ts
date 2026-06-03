@@ -208,3 +208,168 @@ describe('xrpcCall', () => {
     expect(out).toBeUndefined()
   })
 })
+
+describe('xrpcUploadBlob', () => {
+  beforeEach(() => {
+    installWindowStub()
+    vi.resetModules()
+  })
+
+  afterEach(() => {
+    uninstallWindowStub()
+    vi.restoreAllMocks()
+  })
+
+  const sampleBlob = {
+    $type: 'blob' as const,
+    ref: { $link: 'bafkrei-fake-cid' },
+    mimeType: 'image/jpeg',
+    size: 4,
+  }
+
+  it('POSTs raw bytes with the file mime type and returns the blob ref', async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { blob: sampleBlob }))
+    ;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchSpy
+    const { xrpcUploadBlob } = await import('./xrpc')
+    const bytes = new Uint8Array([1, 2, 3, 4])
+    const out = await xrpcUploadBlob({
+      bytes,
+      mimeType: 'image/jpeg',
+      auth: {
+        did: 'did:plc:x',
+        handle: 'a.test',
+        accessJwt: 'access-1',
+        refreshJwt: 'refresh-1',
+      },
+    })
+    expect(out).toEqual(sampleBlob)
+    const [url, init] = fetchSpy.mock.calls[0]!
+    expect(String(url)).toContain('/xrpc/com.atproto.repo.uploadBlob')
+    expect((init as RequestInit).method).toBe('POST')
+    expect((init as RequestInit).headers).toEqual({
+      'content-type': 'image/jpeg',
+      authorization: 'Bearer access-1',
+    })
+    // Body is the raw bytes — not a JSON-serialized string.
+    expect((init as RequestInit).body).toBe(bytes)
+  })
+
+  it('refreshes the session and replays once on ExpiredToken', async () => {
+    const { setSession, getSession } = await import('./session')
+    setSession({
+      did: 'did:plc:x',
+      handle: 'a.test',
+      accessJwt: 'expired',
+      refreshJwt: 'refresh-1',
+    })
+
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(401, { error: 'ExpiredToken', message: 'expired' }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          did: 'did:plc:x',
+          handle: 'a.test',
+          accessJwt: 'access-2',
+          refreshJwt: 'refresh-2',
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { blob: sampleBlob }))
+    ;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchSpy
+
+    const { xrpcUploadBlob } = await import('./xrpc')
+    const out = await xrpcUploadBlob({
+      bytes: new Uint8Array([9, 9, 9]),
+      mimeType: 'image/png',
+      auth: {
+        did: 'did:plc:x',
+        handle: 'a.test',
+        accessJwt: 'expired',
+        refreshJwt: 'refresh-1',
+      },
+    })
+    expect(out).toEqual(sampleBlob)
+    expect(fetchSpy).toHaveBeenCalledTimes(3)
+    expect(getSession()).toEqual({
+      did: 'did:plc:x',
+      handle: 'a.test',
+      accessJwt: 'access-2',
+      refreshJwt: 'refresh-2',
+    })
+    const replayInit = fetchSpy.mock.calls[2]![1] as RequestInit
+    expect(replayInit.headers).toEqual({
+      'content-type': 'image/png',
+      authorization: 'Bearer access-2',
+    })
+  })
+
+  it('clears the session and throws when refresh itself fails', async () => {
+    const { setSession, getSession } = await import('./session')
+    setSession({
+      did: 'did:plc:x',
+      handle: 'a.test',
+      accessJwt: 'expired',
+      refreshJwt: 'dead',
+    })
+
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(401, { error: 'ExpiredToken', message: 'expired' }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(401, { error: 'ExpiredToken', message: 'refresh dead' }),
+      )
+    ;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchSpy
+
+    const { xrpcUploadBlob } = await import('./xrpc')
+    await expect(
+      xrpcUploadBlob({
+        bytes: new Uint8Array([1]),
+        mimeType: 'image/jpeg',
+        auth: {
+          did: 'did:plc:x',
+          handle: 'a.test',
+          accessJwt: 'expired',
+          refreshJwt: 'dead',
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: 'XrpcError',
+      status: 401,
+      errorCode: 'ExpiredToken',
+    })
+    expect(getSession()).toBeNull()
+  })
+
+  it('throws XrpcError carrying the upstream error code on non-401 failures', async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(413, { error: 'BlobTooLarge', message: 'too big' }),
+      )
+    ;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchSpy
+    const { xrpcUploadBlob } = await import('./xrpc')
+    await expect(
+      xrpcUploadBlob({
+        bytes: new Uint8Array(100),
+        mimeType: 'image/jpeg',
+        auth: {
+          did: 'did:plc:x',
+          handle: 'a.test',
+          accessJwt: 'a',
+          refreshJwt: 'r',
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: 'XrpcError',
+      status: 413,
+      errorCode: 'BlobTooLarge',
+      message: 'too big',
+    })
+  })
+})

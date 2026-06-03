@@ -156,6 +156,70 @@ async function tryRefresh(): Promise<Session | null> {
   return next
 }
 
+/**
+ * Upload binary bytes to com.atproto.repo.uploadBlob and return the
+ * lexicon-shaped blob ref. Mirrors `xrpcCall`'s expired-token-then-refresh
+ * loop: if the access JWT is rejected, refresh once and replay; if refresh
+ * itself fails, clear the session and throw an ExpiredToken XrpcError.
+ *
+ * We split this out from `xrpcCall` instead of overloading the input field
+ * because the body here is a raw `Uint8Array` with the file's MIME type as
+ * Content-Type — there's no JSON envelope. Browsers will set Content-Length
+ * automatically; we don't need to chunk for a 1 MB cap.
+ */
+export type BlobRef = {
+  $type: 'blob'
+  ref: { $link: string }
+  mimeType: string
+  size: number
+}
+
+export async function xrpcUploadBlob(args: {
+  bytes: Uint8Array
+  mimeType: string
+  auth: Session
+}): Promise<BlobRef> {
+  const url = buildUrl('com.atproto.repo.uploadBlob', undefined)
+
+  let res = await doUpload(url, args.bytes, args.mimeType, args.auth)
+
+  if (res.status === 401) {
+    const body = await peekBody(res)
+    if (isExpiredToken(body)) {
+      const refreshed = await tryRefresh()
+      if (refreshed) {
+        res = await doUpload(url, args.bytes, args.mimeType, refreshed)
+      } else {
+        clearSession()
+        throw new XrpcError(401, 'ExpiredToken', 'Session expired. Please log in again.')
+      }
+    }
+  }
+
+  const out = await readResponse<{ blob: BlobRef }>(res)
+  return out.blob
+}
+
+async function doUpload(
+  url: string,
+  bytes: Uint8Array,
+  mimeType: string,
+  auth: Session,
+): Promise<Response> {
+  // `fetch` accepts ArrayBuffer/ArrayBufferView for the body; we hand it the
+  // Uint8Array's underlying buffer slice so we don't copy. The BodyInit type
+  // is wider than the runtime expects in some lib targets, so we narrow via
+  // a `BufferSource` cast.
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': mimeType,
+      authorization: `Bearer ${auth.accessJwt}`,
+    },
+    body: bytes as BufferSource,
+  })
+}
+
 async function readResponse<T>(res: Response): Promise<T> {
   // No-content (204 etc.) — return undefined cast as T. Callers asking for
   // void-returning endpoints (deleteSession) won't read it anyway.
