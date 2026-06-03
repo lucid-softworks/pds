@@ -29,7 +29,10 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
+    "tests/**/*.ts",
     "vite.config.ts",
+    "vitest.config.ts",
+    "vitest.setup.ts",
     "drizzle.config.ts",
     "app.config.ts"
   ],
