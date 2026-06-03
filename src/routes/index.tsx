@@ -98,7 +98,7 @@ function HomePage() {
         <LinkCard title="Firehose" href="/xrpc/com.atproto.sync.subscribeRepos">
           WebSocket subscribeRepos. Connect with <code className="font-mono text-xs bg-[var(--color-surface-2)] px-1 py-0.5 rounded">wscat -c</code>.
         </LinkCard>
-        <LinkCard title="Operator console" href="/admin">
+        <LinkCard title="Operator console" href="/admin" hardNav>
           Dashboard for signups and invite codes. Gated by{' '}
           <code className="font-mono text-xs bg-[var(--color-surface-2)] px-1 py-0.5 rounded">PDS_ADMIN_HANDLE</code>.
         </LinkCard>
@@ -180,11 +180,19 @@ function LinkCard({
   href,
   children,
   internal,
+  hardNav,
 }: {
   title: string
   href: string
   children: React.ReactNode
+  /** Use TanStack Router's client-side nav (intra-SPA, with prefetch). */
   internal?: boolean
+  /** Force a full page navigation even on same-origin URLs. Use for
+   *  routes that don't participate in the React SPA — e.g. `/admin/*`
+   *  which is server-rendered HTML with no client hydration. Without
+   *  this, a stale React tree from this page can try to hydrate the
+   *  admin response and crash with #418. */
+  hardNav?: boolean
 }) {
   const className =
     'group block rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:border-[var(--color-accent)]/60 transition-colors'
@@ -201,6 +209,20 @@ function LinkCard({
       <Link to={href} className={className}>
         {Inner}
       </Link>
+    )
+  }
+  if (hardNav) {
+    return (
+      <a
+        href={href}
+        className={className}
+        onClick={(e) => {
+          e.preventDefault()
+          window.location.assign(href)
+        }}
+      >
+        {Inner}
+      </a>
     )
   }
   return (
