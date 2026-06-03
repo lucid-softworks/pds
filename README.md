@@ -225,5 +225,5 @@ the subsystem and notes the contract surface.
 
 ## License
 
-Treat the code as a study aid; pick whatever license suits your downstream
-project.
+[MIT](./LICENSE) — use it as a study aid, vendor pieces into your own PDS,
+fork it, whatever. Attribution appreciated but not required.
