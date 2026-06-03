@@ -1,14 +1,18 @@
 // Lexicon catalog loader.
 //
-// Reads every bundled JSON file at startup, parses it into `LexiconDoc`, and
-// exposes lookup + reference resolution. Parsing is intentionally trusting —
-// the JSON files are checked into the repo, so a malformed one is a build bug,
-// not a runtime threat. We do validate the top-level shape (lexicon == 1, id
-// present) so the failure mode is obvious.
-
-import { readFile, readdir } from 'node:fs/promises'
-import { join, dirname, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+// Reads every bundled JSON file at module-load time, parses it into
+// `LexiconDoc`, and exposes lookup + reference resolution. Parsing is
+// intentionally trusting — the JSON files are checked into the repo, so a
+// malformed one is a build bug, not a runtime threat. We do validate the
+// top-level shape (lexicon == 1, id present) so the failure mode is obvious.
+//
+// We pull every file through Vite's `import.meta.glob({ eager: true })` so
+// the JSON is inlined at *build* time. This survives the production build —
+// the previous `fs.readdir` walk worked in dev/tests (where the file tree
+// is the source tree) but broke under `vite build` because the bundled
+// SSR output has no concept of a "bundled/" directory next to the loader.
+//
+// See chapter 9 — Lexicons, and chapter 18 — Running in production.
 
 import type { LexUserType, LexiconDoc } from './types'
 
@@ -20,35 +24,37 @@ export type LexiconCatalog = {
   all(): Iterable<LexiconDoc>
 }
 
-const BUNDLED_DIR = join(dirname(fileURLToPath(import.meta.url)), 'bundled')
+// Vite inlines every matching JSON at build time. The keys are the
+// posix-style paths relative to this file: e.g.
+// `./bundled/com/atproto/server/createAccount.json`. The values are the
+// parsed JSON modules (because `.json` files have a JSON import attribute
+// by default in Vite, even with `eager: true`).
+const BUNDLED_MODULES = import.meta.glob('./bundled/**/*.json', {
+  eager: true,
+}) as Record<string, { default: unknown }>
 
-/** Walk the bundled/ tree, parse every `.json` file. Caller-controlled —
- *  designed to be invoked once at startup. */
+let cachedCatalog: LexiconCatalog | null = null
+
+/** Build (or return the cached) catalog of every bundled lexicon. Async to
+ *  match the original disk-walking signature; callers stay the same. */
 export async function loadBundledLexicons(): Promise<LexiconCatalog> {
-  const files = await walk(BUNDLED_DIR)
-  const docs = new Map<string, LexiconDoc>()
+  if (cachedCatalog) return cachedCatalog
 
-  for (const file of files) {
-    if (!file.endsWith('.json')) continue
-    const raw = await readFile(file, 'utf8')
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch (err) {
-      throw new Error(`lexicon parse error in ${file}: ${(err as Error).message}`)
-    }
-    const doc = assertLexiconDoc(parsed, file)
+  const docs = new Map<string, LexiconDoc>()
+  for (const [path, mod] of Object.entries(BUNDLED_MODULES)) {
+    const doc = assertLexiconDoc(mod.default, path)
     if (docs.has(doc.id)) {
-      throw new Error(`duplicate lexicon id ${doc.id} (second copy at ${file})`)
+      throw new Error(`duplicate lexicon id ${doc.id} (second copy at ${path})`)
     }
     docs.set(doc.id, doc)
   }
 
-  return makeCatalog(docs)
+  cachedCatalog = makeCatalog(docs)
+  return cachedCatalog
 }
 
-/** Build a catalog from an already-parsed map. Useful for tests + non-Node
- *  embeddings (e.g. if we later inline lexicons via Vite glob imports). */
+/** Build a catalog from an already-parsed map. Used by tests that want to
+ *  inject a hand-rolled lexicon without touching the bundled set. */
 export function makeCatalog(
   docs: Map<string, LexiconDoc>,
 ): LexiconCatalog {
@@ -57,6 +63,12 @@ export function makeCatalog(
     resolve: (ref, contextNsid) => resolveRef(docs, ref, contextNsid),
     all: () => docs.values(),
   }
+}
+
+/** Test-only: clear the cache so a fresh `loadBundledLexicons()` reparses.
+ *  Real callers should never need this — the bundled set is immutable. */
+export function _resetCatalogCacheForTests(): void {
+  cachedCatalog = null
 }
 
 function resolveRef(
@@ -82,21 +94,6 @@ function resolveRef(
   return doc?.defs[defName]
 }
 
-async function walk(dir: string): Promise<string[]> {
-  const out: string[] = []
-  const entries = await readdir(dir, { withFileTypes: true })
-  for (const entry of entries) {
-    const full = join(dir, entry.name)
-    if (entry.isDirectory()) {
-      const nested = await walk(full)
-      out.push(...nested)
-    } else {
-      out.push(full)
-    }
-  }
-  return out
-}
-
 function assertLexiconDoc(value: unknown, path: string): LexiconDoc {
   if (!value || typeof value !== 'object') {
     throw new Error(`lexicon at ${path}: not an object`)
@@ -111,8 +108,8 @@ function assertLexiconDoc(value: unknown, path: string): LexiconDoc {
   if (!obj.defs || typeof obj.defs !== 'object') {
     throw new Error(`lexicon at ${path}: missing "defs" object`)
   }
-  // Sanity: the file's location should encode its NSID. Helps catch typos at
-  // load time (lexicons/foo/bar/baz.json must have id "foo.bar.baz").
+  // Sanity: the file's location should encode its NSID. Helps catch typos
+  // at load time (lexicons/foo/bar/baz.json must have id "foo.bar.baz").
   const expected = expectedNsidFor(path)
   if (expected && obj.id !== expected) {
     throw new Error(
@@ -123,9 +120,12 @@ function assertLexiconDoc(value: unknown, path: string): LexiconDoc {
 }
 
 function expectedNsidFor(path: string): string | null {
-  const marker = `${sep}bundled${sep}`
+  // `import.meta.glob` always yields posix-style paths, e.g.
+  // `./bundled/com/atproto/server/createAccount.json`. Derive the NSID
+  // from the segments after `bundled/`.
+  const marker = '/bundled/'
   const idx = path.indexOf(marker)
   if (idx < 0) return null
   const rel = path.slice(idx + marker.length).replace(/\.json$/, '')
-  return rel.split(sep).join('.')
+  return rel.split('/').join('.')
 }
