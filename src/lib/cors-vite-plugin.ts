@@ -13,10 +13,10 @@
 
 import type { Plugin } from 'vite'
 
-// See src/lib/cors.ts — `*` is the right answer here because we never
-// set ACAC=true. Listing every `x-bsky-*` request header bsky.app might
-// send would be a whack-a-mole bug source.
-const ALLOW_HEADERS = '*'
+// See src/lib/cors.ts for the full story. Short version: `*` catches
+// every `x-bsky-*` request header at once, but the spec refuses to
+// wildcard `Authorization` so we list it explicitly.
+const ALLOW_HEADERS = '*, Authorization'
 const ALLOW_METHODS = 'GET, POST, OPTIONS'
 const EXPOSE_HEADERS = '*'
 

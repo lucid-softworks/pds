@@ -10,40 +10,62 @@ on React, the router, or the docs UI. Each subdirectory matches a chapter in
 | Merkle Search Trees | [`repo/mst.ts`](./repo/mst.ts) | ✅ | [06](../../docs/06-merkle-search-tree.md) |
 | Commits & signing | [`repo/commit.ts`](./repo/commit.ts), [`repo/keys.ts`](./repo/keys.ts) | ✅ | [07](../../docs/07-commits-and-signing.md) |
 | CAR file encoding | [`car/`](./car/) | ✅ | [08](../../docs/08-car-files.md) |
-| Lexicons | [`lexicon/`](./lexicon/) | 🚧 validator in flight | [09](../../docs/09-lexicons.md) |
-| XRPC dispatcher | [`xrpc/server.ts`](./xrpc/server.ts) | ✅ | [10](../../docs/10-xrpc.md) |
-| DIDs & identity | [`did/`](./did/) | ✅ (local-only PLC) | [12](../../docs/12-accounts.md) |
+| Lexicons | [`lexicon/`](./lexicon/) | ✅ runtime validator (observe-only by default) | [09](../../docs/09-lexicons.md) |
+| XRPC dispatcher + proxy | [`xrpc/`](./xrpc/) | ✅ + `Atproto-Proxy` forwarding | [10](../../docs/10-xrpc.md), [17](../../docs/17-pds-appview-relay.md) |
+| DIDs & identity | [`did/`](./did/) | ✅ (local + plc.directory + did:web) | [12](../../docs/12-accounts.md) |
 | Account creation | [`account/create.ts`](./account/create.ts) | ✅ | [12](../../docs/12-accounts.md) |
-| Authentication | [`auth/`](./auth/) | ✅ + app-pw in flight | [13](../../docs/13-authentication.md) |
+| Authentication | [`auth/`](./auth/) | ✅ sessions, app pws, email tokens, scrypt, KeyWrapper | [13](../../docs/13-authentication.md) |
 | Record writes | [`repo/writes.ts`](./repo/writes.ts) | ✅ | [14](../../docs/14-records.md) |
-| Blob storage | [`blob/`](./blob/) | ✅ (filesystem + S3 stub) | [15](../../docs/15-blobs.md) |
+| Blob storage | [`blob/`](./blob/) | ✅ (filesystem + S3 stub, GC) | [15](../../docs/15-blobs.md) |
 | Event sequencer | [`sequencer/sequence.ts`](./sequencer/sequence.ts) | ✅ writer | [16](../../docs/16-firehose.md) |
-| Firehose WebSocket | [`sequencer/firehose.ts`](./sequencer/) | 🚧 in flight | [16](../../docs/16-firehose.md) |
+| Firehose WebSocket | [`sequencer/firehose.ts`](./sequencer/) | ✅ replay + live tail | [16](../../docs/16-firehose.md) |
 | Sync endpoints | [`repo/sync.ts`](./repo/sync.ts) + sync handlers | ✅ | [17](../../docs/17-pds-appview-relay.md) |
+| Admin audit log | [`admin/`](./admin/) | ✅ DAG-CBOR `admin_audit` | [19](../../docs/19-moderation.md) |
+| Account migration | [`account/create.ts`](./account/create.ts) (migrating-in) + migration handlers | ✅ | [20](../../docs/20-migration.md) |
+| OAuth (AS + RS) | [`oauth/`](./oauth/) | ✅ PAR + PKCE + DPoP + JWKS | [21](../../docs/21-oauth.md) |
 
 ## XRPC endpoints
 
 Every XRPC handler lives under [`xrpc/handlers/`](./xrpc/handlers/) as a
 single file named after its NSID. The handler registry (one line per
 endpoint) is in [`xrpc/handlers/index.ts`](./xrpc/handlers/index.ts).
-
-Currently shipped (22):
+Currently shipped (39):
 
 ```
-com.atproto.server.createAccount     com.atproto.repo.createRecord
-com.atproto.server.createSession     com.atproto.repo.putRecord
-com.atproto.server.refreshSession    com.atproto.repo.deleteRecord
-com.atproto.server.deleteSession     com.atproto.repo.getRecord
-com.atproto.server.getSession        com.atproto.repo.listRecords
-com.atproto.server.describeServer    com.atproto.repo.applyWrites
-                                     com.atproto.repo.describeRepo
-com.atproto.identity.resolveHandle   com.atproto.repo.uploadBlob
-
-com.atproto.sync.getRepo             com.atproto.sync.getBlob
-com.atproto.sync.getBlocks           com.atproto.sync.getRepoStatus
-com.atproto.sync.getRecord           com.atproto.sync.listRepos
-com.atproto.sync.getLatestCommit
+─── com.atproto.server.* ───────────────────────────────────────
+createAccount       refreshSession    requestEmailConfirmation
+createSession       deleteSession     confirmEmail
+describeServer      getSession        requestEmailUpdate
+createInviteCode    createInviteCodes updateEmail
+getAccountInviteCodes  checkSignupQueue
+checkAccountStatus  deactivateAccount activateAccount
+requestAccountDelete  deleteAccount
+createAppPassword   listAppPasswords  revokeAppPassword
+requestPasswordReset  resetPassword
+─── com.atproto.server.* (migration) ───────────────────────────
+getServiceAuth      reserveSigningKey   requestAccountMigrate
+─── com.atproto.identity.* ─────────────────────────────────────
+resolveHandle       updateHandle
+requestPlcOperationSignature   signPlcOperation
+─── com.atproto.repo.* ─────────────────────────────────────────
+createRecord  putRecord  deleteRecord  getRecord  listRecords
+applyWrites   describeRepo  uploadBlob  importRepo
+─── com.atproto.sync.* (HTTP + WS) ─────────────────────────────
+getRepo  getBlocks  getRecord  getLatestCommit  getRepoStatus
+listRepos  getBlob  listMissingBlobs  subscribeRepos
+─── com.atproto.admin.* ────────────────────────────────────────
+getAccountInfo  getAccountInfos
+updateAccountStatus  updateAccountHandle  updateAccountEmail
+sendEmail  deleteAccount  getAuditLog
+─── app.bsky.actor.* (PDS-served slice of the bsky surface) ────
+getPreferences  putPreferences
 ```
+
+Anything *not* in this list, when called with an `Atproto-Proxy:
+<did>#<service-id>` header, is forwarded to the named upstream service
+with a freshly-minted ES256K service-auth JWT signed by the caller's
+repo key — see [`xrpc/proxy.ts`](./xrpc/proxy.ts) and chapter 17.
+Without the header, unknown NSIDs 404.
 
 ## Dependency arrow
 
@@ -52,27 +74,31 @@ ones:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  src/routes/xrpc/$nsid.ts  +  src/routes/.well-known/*     │
+│  src/routes/xrpc/$nsid.ts  +  src/routes/[.well-known]/*   │
+│  src/routes/oauth/*  +  src/routes/admin/*                 │
 │  (TanStack route shells)                                   │
 └────────────────────────┬───────────────────────────────────┘
                          │
 ┌────────────────────────▼───────────────────────────────────┐
 │  xrpc/handlers/* — one file per NSID                       │
+│  xrpc/proxy.ts  — Atproto-Proxy forwarding                 │
 └────────────────────────┬───────────────────────────────────┘
                          │
-                  ┌──────┴──────┐
-                  ▼             ▼
-            ┌──────────┐  ┌──────────────┐
-            │ account/ │  │ repo/writes  │
-            └────┬─────┘  └──────┬───────┘
-                 │               │
-   ┌─────────────┼───────────────┼──────────────┐
-   ▼             ▼               ▼              ▼
-┌──────┐   ┌───────────┐   ┌─────────┐   ┌──────────────┐
-│ did/ │   │   auth/   │   │  blob/  │   │  sequencer/  │
-└──┬───┘   └─────┬─────┘   └────┬────┘   └──────┬───────┘
-   │             │              │               │
-   ▼             ▼              ▼               ▼
+   ┌─────────────────────┼──────────────────┬─────────────┐
+   ▼                     ▼                  ▼             ▼
+┌──────────┐    ┌──────────────┐   ┌──────────┐   ┌────────────┐
+│ account/ │    │ repo/writes  │   │ oauth/   │   │  admin/    │
+└────┬─────┘    └──────┬───────┘   └────┬─────┘   └─────┬──────┘
+     │                 │                │               │
+   ┌─┼────────┬────────┼────────────────┼──────┐        │
+   ▼ ▼        ▼        ▼                ▼      ▼        │
+┌──────┐ ┌───────────┐ ┌─────────┐ ┌──────────────┐    │
+│ did/ │ │   auth/   │ │  blob/  │ │  sequencer/  │    │
+└──┬───┘ └─────┬─────┘ └────┬────┘ └──────┬───────┘    │
+   │           │            │             │             │
+   └───────────┴────────────┴─────────────┴─────────────┘
+                         │
+                         ▼
         ┌────────────────────────────────┐
         │       repo/{mst,commit}        │
         └────────────────┬───────────────┘
@@ -103,3 +129,6 @@ See the README in each subdirectory:
 - [`auth/README.md`](./auth/README.md)
 - [`blob/README.md`](./blob/README.md)
 - [`sequencer/README.md`](./sequencer/README.md)
+- [`account/README.md`](./account/README.md)
+- [`admin/README.md`](./admin/README.md)
+- [`oauth/README.md`](./oauth/README.md)

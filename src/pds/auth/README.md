@@ -22,9 +22,23 @@ tokens** drive the confirmation, update, and password-reset flows.
   shown to the user exactly once at creation. Stored as a scrypt hash in
   the same format as the main password.
 - [`middleware.ts`](./middleware.ts) — `requireAccessAuth`,
-  `requireRefreshAuth`, `optionalAccessAuth`. Parses Bearer tokens,
-  distinguishes `AuthMissing` / `InvalidToken` / `ExpiredToken` /
-  status-specific 403s.
+  `requireRefreshAuth`, `optionalAccessAuth`, `requireOauthAccess`
+  (DPoP-bound OAuth), `requireEitherAuth` (legacy bearer OR OAuth
+  DPoP). Parses Bearer tokens, distinguishes `AuthMissing` /
+  `InvalidToken` / `ExpiredToken` / status-specific 403s.
+- [`key_wrap.ts`](./key_wrap.ts) — pluggable **at-rest signing-key
+  protection**. Account rows hold the repo signing scalar; in
+  production those bytes should be wrapped (AES-GCM with a deploy-time
+  key, or KMS / age in a future iteration). The wrapper is selected by
+  `PDS_KEY_WRAP`: `plain` (default, bytes as hex), `gcm` (envelope
+  encryption with `PDS_KEY_WRAP_GCM_KEY`). Mixed-mode reads are
+  supported so the operator can rotate by re-wrapping live. See
+  chapter 18.
+- [`email_sender.ts`](./email_sender.ts) — pluggable `EmailBackend`
+  for verification + password-reset + admin-sent mail. Default is the
+  `console` backend that logs to stdout (fine for first boot);
+  `http-json` POSTs to a transactional provider (Resend / Postmark /
+  generic).
 
 ## Tables touched
 

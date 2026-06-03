@@ -19,16 +19,19 @@
 //
 // See chapter 10 — XRPC.
 
-// `*` works because we never set `Access-Control-Allow-Credentials: true`
-// (no cookies — auth is bearer-only). Per the Fetch spec, ACAH=* and
-// ACEH=* are the wildcards for non-credentialed requests: they allow ALL
-// request headers (including custom ones like `x-bsky-topics`,
-// `x-bsky-tier`, etc. that future bsky.app clients keep adding) and
-// expose ALL response headers (including ones we haven't anticipated
-// like `ratelimit-*`, `dpop-nonce`, etc.) to caller JavaScript.
-// Enumerating ATProto's full per-client header set would be a
-// never-ending bug magnet — every client release adds another `x-*`.
-const ALLOW_HEADERS = '*'
+// `*` covers every header bsky.app might add (`x-bsky-topics`,
+// `x-bsky-tier`, etc.) AND every header the AppView returns
+// (`ratelimit-*`, `dpop-nonce`, …) without us having to chase per-client
+// header lists. Two spec quirks to be aware of:
+//
+//   1. `*` in `Access-Control-Allow-Headers` does NOT cover
+//      `Authorization` — the spec treats it as a forbidden header name
+//      and refuses to wildcard it. We list it explicitly alongside the
+//      `*` so a bearer token is always acceptable.
+//   2. `*` is only the wildcard for *non-credentialed* requests. We
+//      never set `Access-Control-Allow-Credentials: true` (auth is
+//      bearer-only, no cookies), so this is fine.
+const ALLOW_HEADERS = '*, Authorization'
 const ALLOW_METHODS = 'GET, POST, OPTIONS'
 const EXPOSE_HEADERS = '*'
 

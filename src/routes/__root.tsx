@@ -22,7 +22,13 @@ export const Route = createRootRoute({
           'A from-scratch reimplementation of the Bluesky PDS in TanStack Start, paired with tutorial chapters that explain each subsystem so you can build your own.',
       },
     ],
-    links: [{ rel: 'stylesheet', href: appCss }],
+    links: [
+      { rel: 'stylesheet', href: appCss },
+      // SVG favicon scales crisp at every density; modern browsers all
+      // accept it. The asset lives in public/ so Vite copies it
+      // verbatim into dist/client/.
+      { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+    ],
   }),
   component: RootComponent,
 })

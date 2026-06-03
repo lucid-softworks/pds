@@ -314,13 +314,14 @@ Three things to know:
    header. The combination of `Allow-Origin: *` and any credentialed
    request is rejected by browsers anyway, so even if a future route
    added cookies, this wouldn't accidentally leak them.
-2. **Allow-Headers and Expose-Headers are both `*`** — wildcards for
-   non-credentialed requests, per the Fetch spec. The official Bluesky
-   client adds `x-bsky-*` request headers (and the AppView returns
-   `ratelimit-*`, `dpop-nonce`, etc.) on a roughly-quarterly cadence;
-   enumerating them is a whack-a-mole bug source. Wildcards mean any
-   header the client sends is acceptable and any header we (or our
-   proxy targets) set is readable from caller JavaScript.
+2. **Allow-Headers is `*, Authorization`; Expose-Headers is `*`** —
+   wildcards for non-credentialed requests, per the Fetch spec. The
+   official Bluesky client adds `x-bsky-*` request headers (and the
+   AppView returns `ratelimit-*`, `dpop-nonce`, etc.) on a
+   roughly-quarterly cadence; enumerating them is a whack-a-mole bug
+   source. Spec quirk: `*` in Allow-Headers does **not** cover
+   `Authorization` — it's a forbidden header name and the wildcard
+   refuses to bind to it — so we list it explicitly next to the `*`.
 3. **Preflight is short-circuited at the edge.** `server.ts` returns
    a 204 with the headers above for every `OPTIONS` request before the
    fetch handler runs, so route files never have to think about CORS.
