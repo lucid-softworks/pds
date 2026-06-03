@@ -19,21 +19,18 @@
 //
 // See chapter 10 — XRPC.
 
-const ALLOW_HEADERS = [
-  'Accept',
-  'Accept-Language',
-  'Authorization',
-  'Content-Type',
-  'Content-Language',
-  'Atproto-Accept-Labelers',
-  'Atproto-Proxy',
-  'DPoP',
-  'DPoP-Nonce',
-].join(', ')
-
+// `*` works because we never set `Access-Control-Allow-Credentials: true`
+// (no cookies — auth is bearer-only). Per the Fetch spec, ACAH=* and
+// ACEH=* are the wildcards for non-credentialed requests: they allow ALL
+// request headers (including custom ones like `x-bsky-topics`,
+// `x-bsky-tier`, etc. that future bsky.app clients keep adding) and
+// expose ALL response headers (including ones we haven't anticipated
+// like `ratelimit-*`, `dpop-nonce`, etc.) to caller JavaScript.
+// Enumerating ATProto's full per-client header set would be a
+// never-ending bug magnet — every client release adds another `x-*`.
+const ALLOW_HEADERS = '*'
 const ALLOW_METHODS = 'GET, POST, OPTIONS'
-
-const EXPOSE_HEADERS = ['DPoP-Nonce', 'WWW-Authenticate'].join(', ')
+const EXPOSE_HEADERS = '*'
 
 /** Merge CORS headers onto a Response. Pass any existing Response through
  *  to add the headers without losing the body / status / other headers. */

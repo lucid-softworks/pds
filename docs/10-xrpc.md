@@ -307,17 +307,23 @@ not per-route:
 - `src/lib/cors-vite-plugin.ts` — mirrors the same behaviour on the
   Vite dev server so dev and prod don't disagree.
 
-Two things to know:
+Three things to know:
 
 1. **Allow-Origin is `*`, not `Origin` echoed back.** Safe because no
    XRPC route reads cookies: auth is bearer-JWT in the `Authorization`
    header. The combination of `Allow-Origin: *` and any credentialed
    request is rejected by browsers anyway, so even if a future route
    added cookies, this wouldn't accidentally leak them.
-2. **DPoP-Nonce and WWW-Authenticate are in `Expose-Headers`.** The
-   chapter-21 OAuth flows need clients to read those response headers
-   directly; without `Expose-Headers` the browser hides them from
-   JavaScript even when the request succeeded.
+2. **Allow-Headers and Expose-Headers are both `*`** — wildcards for
+   non-credentialed requests, per the Fetch spec. The official Bluesky
+   client adds `x-bsky-*` request headers (and the AppView returns
+   `ratelimit-*`, `dpop-nonce`, etc.) on a roughly-quarterly cadence;
+   enumerating them is a whack-a-mole bug source. Wildcards mean any
+   header the client sends is acceptable and any header we (or our
+   proxy targets) set is readable from caller JavaScript.
+3. **Preflight is short-circuited at the edge.** `server.ts` returns
+   a 204 with the headers above for every `OPTIONS` request before the
+   fetch handler runs, so route files never have to think about CORS.
 
 If you add a new top-level route that isn't expected to be called by
 external clients (an admin-only HTML page, say), it still gets CORS for

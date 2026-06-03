@@ -13,20 +13,12 @@
 
 import type { Plugin } from 'vite'
 
-const ALLOW_HEADERS = [
-  'Accept',
-  'Accept-Language',
-  'Authorization',
-  'Content-Type',
-  'Content-Language',
-  'Atproto-Accept-Labelers',
-  'Atproto-Proxy',
-  'DPoP',
-  'DPoP-Nonce',
-].join(', ')
-
+// See src/lib/cors.ts — `*` is the right answer here because we never
+// set ACAC=true. Listing every `x-bsky-*` request header bsky.app might
+// send would be a whack-a-mole bug source.
+const ALLOW_HEADERS = '*'
 const ALLOW_METHODS = 'GET, POST, OPTIONS'
-const EXPOSE_HEADERS = ['DPoP-Nonce', 'WWW-Authenticate'].join(', ')
+const EXPOSE_HEADERS = '*'
 
 const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-origin': '*',
