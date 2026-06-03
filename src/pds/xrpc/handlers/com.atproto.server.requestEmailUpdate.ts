@@ -12,7 +12,7 @@
 import { z } from 'zod'
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest } from '../errors'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { issueEmailToken } from '~/pds/auth/email'
 import { sendEmail } from '~/pds/auth/email_sender'
 
@@ -22,8 +22,11 @@ const InputSchema = z.object({
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-const handler: Handler = async ({ input, authorization }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ input, authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'transition:generic',
+  )
   const parsed = InputSchema.safeParse(input)
   if (!parsed.success) {
     throw BadRequest(

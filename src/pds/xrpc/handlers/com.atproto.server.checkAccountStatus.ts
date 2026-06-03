@@ -16,10 +16,14 @@ import type { Handler, HandlerDef } from '../server'
 import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 
-const handler: Handler = async ({ authorization }) => {
-  const me = await requireAccessAuth(authorization, { allowDeactivated: true })
+const handler: Handler = async ({ authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'atproto',
+    { allowDeactivated: true },
+  )
   const rows = await db
     .select({
       did: accounts.did,

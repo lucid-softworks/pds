@@ -8,7 +8,7 @@
 import { z } from 'zod'
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest, Forbidden } from '../errors'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { applyWrites } from '~/pds/repo/writes'
 import { resolveRepoIdent } from './_lib/resolveRepo'
 
@@ -21,14 +21,17 @@ const InputSchema = z.object({
   swapCommit: z.string().optional(),
 })
 
-const handler: Handler = async ({ input, authorization }) => {
+const handler: Handler = async ({ input, authorization, dpopProof, request }) => {
   const parsed = InputSchema.safeParse(input)
   if (!parsed.success) {
     throw BadRequest(
       'invalid input: ' + parsed.error.issues.map((i) => i.message).join('; '),
     )
   }
-  const me = await requireAccessAuth(authorization)
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'transition:generic',
+  )
   const did = await resolveRepoIdent(parsed.data.repo)
   if (did !== me.did) {
     throw Forbidden('cannot write to another account’s repo', 'AuthRequired')

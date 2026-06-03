@@ -16,7 +16,7 @@ import type { Handler, HandlerDef } from '../server'
 import { BadRequest, Conflict, InternalError } from '../errors'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import {
   InvalidHandleError,
   assertValidHandle,
@@ -30,8 +30,11 @@ const InputSchema = z.object({
   handle: z.string().min(1),
 })
 
-const handler: Handler = async ({ input, authorization }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ input, authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'transition:generic',
+  )
   const parsed = InputSchema.safeParse(input)
   if (!parsed.success) {
     throw BadRequest(

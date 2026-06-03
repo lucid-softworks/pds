@@ -38,10 +38,13 @@ import { MST } from '~/pds/repo/mst'
 import { blockStoreForDid } from '~/pds/repo/writes'
 import { extractBlobCids } from '~/pds/blob/refs'
 import { emitCommit, type CommitOp } from '~/pds/sequencer/sequence'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 
-const handler: Handler = async ({ authorization, request }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'transition:generic',
+  )
   if (!request.body) {
     throw BadRequest('request body is required', 'InvalidRequest')
   }

@@ -19,22 +19,25 @@ import type { Handler, HandlerDef } from '../server'
 import { BadRequest, Forbidden } from '../errors'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { emitAccount } from '~/pds/sequencer/sequence'
 
 const InputSchema = z.object({
   deleteAfter: z.string().optional(),
 })
 
-const handler: Handler = async ({ input, authorization }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ input, authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'transition:generic',
+  )
   const parsed = InputSchema.safeParse(input ?? {})
   if (!parsed.success) {
     throw BadRequest(
       'invalid input: ' + parsed.error.issues.map((i) => i.message).join('; '),
     )
   }
-  // requireAccessAuth (without allowDeactivated) already rejected anything
+  // requireAuthWithScope (without allowDeactivated) already rejected anything
   // other than 'active'; this defensive check keeps the state machine
   // honest if the middleware policy ever drifts.
   if (me.status !== 'active') {

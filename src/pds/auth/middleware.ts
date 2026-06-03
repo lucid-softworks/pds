@@ -113,6 +113,54 @@ export async function requireEitherAuth(args: {
   )
 }
 
+/** Atproto OAuth scopes the resource server cares about today.
+ *
+ *  - `atproto` — minimal "who am I" scope. Lets the client confirm the
+ *    user's identity and read public data, but not write records.
+ *  - `transition:generic` — the broader scope an OAuth client requests to
+ *    perform writes on the user's behalf. Implies `atproto`. */
+export type RequiredScope = 'atproto' | 'transition:generic'
+
+/** Throw Forbidden `InsufficientScope` if the requested scope isn't a
+ *  subset of the granted scope. Session-flow auth (`scope === 'session'`)
+ *  has every scope implicitly — the legacy first-party flow predates the
+ *  OAuth-scope concept and is treated as fully privileged. Only OAuth
+ *  tokens carry a scope claim, and we enforce it here. */
+export function requireScope(
+  account: AuthenticatedAccount & { scope: string },
+  required: RequiredScope,
+): void {
+  if (account.scope === 'session') return
+  const granted = account.scope.split(/\s+/).filter((s) => s.length > 0)
+  if (granted.includes(required)) return
+  // `transition:generic` is a strict superset of `atproto` — the official
+  // atproto profile defines it that way, and clients that asked for the
+  // broader scope expect the narrower one to come along for the ride.
+  if (required === 'atproto' && granted.includes('transition:generic')) return
+  throw Forbidden(
+    `token scope '${account.scope}' lacks required '${required}'`,
+    'InsufficientScope',
+  )
+}
+
+/** Sugar over `requireEitherAuth + requireScope` so handlers stay a single
+ *  line at the top of the body. Returns the same `AuthenticatedAccount &
+ *  { scope }` shape as `requireEitherAuth`. */
+export async function requireAuthWithScope(
+  ctx: { authorization?: string; dpopProof?: string; request: Request },
+  scope: RequiredScope,
+  opts?: AuthOptions,
+): Promise<AuthenticatedAccount & { scope: string }> {
+  const account = await requireEitherAuth({
+    authorization: ctx.authorization,
+    dpopProof: ctx.dpopProof,
+    request: ctx.request,
+    opts,
+  })
+  requireScope(account, scope)
+  return account
+}
+
 /** Validate the Authorization header as HTTP Basic with the configured admin
  *  password. The username field is conventionally `admin` and is ignored.
  *  Throws when the admin surface is disabled (no hash configured), the

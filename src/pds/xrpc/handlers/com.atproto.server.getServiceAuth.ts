@@ -16,14 +16,17 @@
 
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest } from '../errors'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { signServiceToken } from '~/pds/auth/jwt'
 
 const MAX_TTL_SECONDS = 60
 const NSID_RE = /^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+(\.[a-zA-Z][a-zA-Z0-9]*)$/
 
-const handler: Handler = async ({ params, authorization }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ params, authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'atproto',
+  )
 
   const aud = params.aud?.trim()
   if (!aud) throw BadRequest('aud parameter is required', 'InvalidRequest')

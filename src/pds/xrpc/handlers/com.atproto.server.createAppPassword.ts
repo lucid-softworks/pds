@@ -14,7 +14,7 @@ import type { Handler, HandlerDef } from '../server'
 import { BadRequest, Conflict } from '../errors'
 import { db } from '~/lib/db'
 import { appPasswords } from '~/lib/db/schema'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { createAppPassword } from '~/pds/auth/app_password'
 
 const NAME_RE = /^[a-zA-Z0-9._-]{4,32}$/
@@ -24,8 +24,11 @@ const InputSchema = z.object({
   privileged: z.boolean().optional(),
 })
 
-const handler: Handler = async ({ input, authorization }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ input, authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'transition:generic',
+  )
   const parsed = InputSchema.safeParse(input)
   if (!parsed.success) {
     throw BadRequest(

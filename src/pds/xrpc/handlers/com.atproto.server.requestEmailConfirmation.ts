@@ -10,12 +10,15 @@ import { eq } from 'drizzle-orm'
 import type { Handler, HandlerDef } from '../server'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { issueEmailToken } from '~/pds/auth/email'
 import { sendEmail } from '~/pds/auth/email_sender'
 
-const handler: Handler = async ({ authorization }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'transition:generic',
+  )
   const rows = await db
     .select({
       email: accounts.email,

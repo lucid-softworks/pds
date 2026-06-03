@@ -13,11 +13,15 @@ import type { Handler, HandlerDef } from '../server'
 import { Forbidden } from '../errors'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { emitAccount } from '~/pds/sequencer/sequence'
 
-const handler: Handler = async ({ authorization }) => {
-  const me = await requireAccessAuth(authorization, { allowDeactivated: true })
+const handler: Handler = async ({ authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'transition:generic',
+    { allowDeactivated: true },
+  )
   if (me.status === 'active') {
     // Already active — re-activation is a no-op rather than an error so
     // clients can retry safely.

@@ -12,15 +12,18 @@
 import { z } from 'zod'
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest } from '../errors'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { revokeAppPassword } from '~/pds/auth/app_password'
 
 const InputSchema = z.object({
   name: z.string().min(1),
 })
 
-const handler: Handler = async ({ input, authorization }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ input, authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'transition:generic',
+  )
   const parsed = InputSchema.safeParse(input)
   if (!parsed.success) {
     throw BadRequest(

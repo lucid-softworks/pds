@@ -536,7 +536,8 @@ the same `dpop_jkt`.
 ## Plumbing OAuth tokens into XRPC handlers
 
 The front half mints tokens; the back half lets clients *use* them.
-Wave 9B closes the loop in `src/pds/auth/middleware.ts`:
+Wave 9B closed the loop in `src/pds/auth/middleware.ts`; Wave 10B
+finished the migration:
 
 ```ts
 export async function requireOauthAccess(args: {
@@ -552,6 +553,12 @@ export async function requireEitherAuth(args: {
   request: Request
   opts?: AuthOptions
 }): Promise<AuthenticatedAccount & { scope: string }>
+
+export async function requireAuthWithScope(
+  ctx: { authorization?: string; dpopProof?: string; request: Request },
+  scope: 'atproto' | 'transition:generic',
+  opts?: AuthOptions,
+): Promise<AuthenticatedAccount & { scope: string }>
 ```
 
 A client paired with an OAuth token sends:
@@ -563,8 +570,8 @@ DPoP: <proof-jwt>
 
 The dispatcher in `src/pds/xrpc/server.ts` carries the paired `DPoP:`
 header alongside the existing `Authorization` header in `HandlerCtx.dpopProof`
-— literally just `request.headers.get('dpop')`. Handlers that opt in call
-`requireEitherAuth({ authorization, dpopProof, request })`, which:
+— literally just `request.headers.get('dpop')`. Handlers call
+`requireAuthWithScope({ authorization, dpopProof, request }, scope)`, which:
 
 1. **Inspects the scheme.** `Bearer …` delegates to the chapter-13
    `requireAccessAuth` and tags the result with `scope: 'session'`.
@@ -579,35 +586,86 @@ header alongside the existing `Authorization` header in `HandlerCtx.dpopProof`
    `InvalidToken`.
 3. **Loads the account** by the token's `sub` and applies the same
    active / deactivated gate the legacy flow uses.
+4. **Enforces scope.** `requireScope(account, required)` lets every
+   session-flow caller through (the legacy flow predates OAuth scopes
+   and is treated as fully privileged), accepts an OAuth token whose
+   space-separated scope claim contains `required`, and treats
+   `transition:generic` as a superset of `atproto`. Anything else is
+   `Forbidden` `InsufficientScope`.
 
-We *don't* migrate every handler. The two schemes are equivalent on
-endpoints that just need "the caller is this DID" — the legacy
-session JWT is still the first-party PDS flow for the official client,
-and migrating fifty handlers wholesale would be a lot of mechanical
-diff for no behaviour change. Instead, handlers opt in case-by-case.
-`com.atproto.server.getSession` is the first to do so: it's the most
-natural OAuth resource (an `at://me` lookup) and a good template for
-the rest. Every other handler still calls `requireAccessAuth` and
-accepts only the legacy scheme — including `com.atproto.repo.createRecord`,
-`updateHandle`, and the admin surface — until they too get migrated.
+### Required scope per handler
 
-When you migrate a handler, the change is two lines:
+All ~30 auth-required handlers now accept both schemes; the table below
+lists the scope each one demands of an OAuth caller. Two atproto-profile
+scopes drive the matrix:
+
+- `atproto` — minimal "who am I" — lets the client confirm identity and
+  read non-sensitive data.
+- `transition:generic` — strict superset — also lets the client write on
+  the user's behalf.
+
+| Handler | Required scope |
+| --- | --- |
+| `com.atproto.server.getSession` | `atproto` |
+| `com.atproto.server.getAccountInviteCodes` | `atproto` |
+| `com.atproto.server.checkAccountStatus` | `atproto` (allowDeactivated) |
+| `com.atproto.server.getServiceAuth` | `atproto` |
+| `com.atproto.server.createAppPassword` | `transition:generic` |
+| `com.atproto.server.listAppPasswords` | `transition:generic` |
+| `com.atproto.server.revokeAppPassword` | `transition:generic` |
+| `com.atproto.server.requestEmailConfirmation` | `transition:generic` |
+| `com.atproto.server.confirmEmail` | `transition:generic` |
+| `com.atproto.server.requestEmailUpdate` | `transition:generic` |
+| `com.atproto.server.updateEmail` | `transition:generic` |
+| `com.atproto.server.requestAccountDelete` | `transition:generic` |
+| `com.atproto.server.deleteAccount` | `transition:generic` |
+| `com.atproto.server.deactivateAccount` | `transition:generic` |
+| `com.atproto.server.activateAccount` | `transition:generic` (allowDeactivated) |
+| `com.atproto.repo.createRecord` | `transition:generic` |
+| `com.atproto.repo.putRecord` | `transition:generic` |
+| `com.atproto.repo.deleteRecord` | `transition:generic` |
+| `com.atproto.repo.applyWrites` | `transition:generic` |
+| `com.atproto.repo.uploadBlob` | `transition:generic` |
+| `com.atproto.repo.importRepo` | `transition:generic` |
+| `com.atproto.identity.updateHandle` | `transition:generic` |
+
+A small set of authenticated handlers is intentionally session-only and
+does *not* accept the OAuth scheme:
+
+- `com.atproto.server.refreshSession` and `com.atproto.server.deleteSession`
+  carry their own refresh-token shape (chapter 13's
+  `requireRefreshAuth`); the OAuth equivalent is `/oauth/token` with
+  `grant_type=refresh_token` plus a DPoP proof. There's no shared
+  surface to migrate.
+- `com.atproto.server.createInviteCode` and `createInviteCodes` are
+  admin-only and run through `requireAdmin` (HTTP Basic) — a totally
+  separate scheme.
+- The entire `com.atproto.admin.*` namespace is admin-Basic too.
+
+### The mechanical migration
+
+The pattern for each migrated handler is one line at the top of the
+body:
 
 ```diff
 - import { requireAccessAuth } from '~/pds/auth/middleware'
-+ import { requireEitherAuth } from '~/pds/auth/middleware'
++ import { requireAuthWithScope } from '~/pds/auth/middleware'
 
 - const handler: Handler = async ({ authorization }) => {
 -   const me = await requireAccessAuth(authorization)
 + const handler: Handler = async ({ authorization, dpopProof, request }) => {
-+   const me = await requireEitherAuth({ authorization, dpopProof, request })
++   const me = await requireAuthWithScope(
++     { authorization, dpopProof, request },
++     'transition:generic',
++   )
 ```
 
 The returned `me` carries an additional `scope` field — `'session'` if
 the caller used the legacy flow, or the OAuth token's `scope` claim if
-they used DPoP. Future scope-aware enforcement (rejecting a narrow
-`atproto` token from a `com.atproto.repo.applyWrites` call, say) lives
-in the handler that knows what scope it requires.
+they used DPoP. The `requireAuthWithScope` wrapper composes
+`requireEitherAuth` + `requireScope`; handlers that want the dispatcher
+result *without* a scope assertion (none today) can still call
+`requireEitherAuth` directly.
 
 ## What's still missing
 

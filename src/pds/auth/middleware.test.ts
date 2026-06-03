@@ -39,6 +39,7 @@ import {
   requireAccessAuth,
   requireEitherAuth,
   requireOauthAccess,
+  requireScope,
 } from './middleware'
 
 // Caller helpers — make a Request, build OAuth credentials.
@@ -380,6 +381,60 @@ describe('requireEitherAuth (dispatcher entry)', () => {
         }),
       401,
       'AuthMissing',
+    )
+  })
+})
+
+describe('requireScope (OAuth scope gating)', () => {
+  // Build a minimal account stub — the real loadAccount path is exercised by
+  // the suites above; this test set is purely about the scope-string logic.
+  const stub = (scope: string) => ({
+    did: 'did:plc:scope-test',
+    handle: 'scope-test.example.com',
+    email: 'scope-test@example.test',
+    status: 'active',
+    scope,
+  })
+
+  it('accepts a session-scope account for any required scope', () => {
+    const acct = stub('session')
+    // Both calls must return undefined (no throw).
+    expect(() => requireScope(acct, 'atproto')).not.toThrow()
+    expect(() => requireScope(acct, 'transition:generic')).not.toThrow()
+  })
+
+  it('accepts a transition:generic token for transition:generic', () => {
+    const acct = stub('atproto transition:generic')
+    expect(() => requireScope(acct, 'transition:generic')).not.toThrow()
+  })
+
+  it('accepts a transition:generic token for atproto (implies it)', () => {
+    // Tokens issued with only 'transition:generic' (no explicit 'atproto')
+    // still cover the narrower scope — the broader one is a superset.
+    const acct = stub('transition:generic')
+    expect(() => requireScope(acct, 'atproto')).not.toThrow()
+  })
+
+  it('accepts an atproto-only token for atproto', () => {
+    const acct = stub('atproto')
+    expect(() => requireScope(acct, 'atproto')).not.toThrow()
+  })
+
+  it('rejects an atproto-only token for transition:generic', async () => {
+    const acct = stub('atproto')
+    await expectXrpcError(
+      () => Promise.resolve(requireScope(acct, 'transition:generic')),
+      403,
+      'InsufficientScope',
+    )
+  })
+
+  it('rejects a token with an unrelated scope string', async () => {
+    const acct = stub('com.example.bespoke')
+    await expectXrpcError(
+      () => Promise.resolve(requireScope(acct, 'atproto')),
+      403,
+      'InsufficientScope',
     )
   })
 })

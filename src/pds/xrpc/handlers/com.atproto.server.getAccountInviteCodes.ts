@@ -11,11 +11,14 @@
 // See chapter 12 — Account creation, Invite codes.
 
 import type { Handler, HandlerDef } from '../server'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { listInviteCodesForAccount } from '~/pds/account/invites'
 
-const handler: Handler = async ({ authorization }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'atproto',
+  )
   const rows = await listInviteCodesForAccount(me.did)
   return {
     codes: rows.map((r) => ({

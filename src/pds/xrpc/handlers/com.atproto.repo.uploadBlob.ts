@@ -11,13 +11,16 @@
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest } from '../errors'
 import { XrpcError } from '../errors'
-import { requireAccessAuth } from '~/pds/auth/middleware'
+import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { uploadBlob } from '~/pds/blob/upload'
 
 const MAX_BLOB_BYTES = 5 * 1024 * 1024 // 5 MB
 
-const handler: Handler = async ({ authorization, request }) => {
-  const me = await requireAccessAuth(authorization)
+const handler: Handler = async ({ authorization, dpopProof, request }) => {
+  const me = await requireAuthWithScope(
+    { authorization, dpopProof, request },
+    'transition:generic',
+  )
   const mimeType =
     request.headers.get('content-type') ?? 'application/octet-stream'
   const buf = await request.arrayBuffer()
