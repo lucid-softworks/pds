@@ -27,6 +27,7 @@ import { accounts, plcOperations } from '~/lib/db/schema'
 import { requireAuthWithScope } from '~/pds/auth/middleware'
 import { consumeEmailToken } from '~/pds/auth/email'
 import { encode } from '~/pds/codec'
+import { getKeyWrapper } from '~/pds/auth/key_wrap'
 import { signBytes } from '~/pds/repo/keys'
 import {
   loadLatestPlcOp,
@@ -120,8 +121,12 @@ const handler: Handler = async ({ input, authorization, dpopProof, request }) =>
 
   // 5. Sign + persist. Same shape as rotatePlc; we hand-roll because the
   //    caller's overlay can change every field, not just the handle.
+  //    Unwrap the at-rest rotation key right before the signature — the
+  //    plaintext scalar lives in a single local for the next two lines
+  //    and isn't passed around.
+  const rotationKeyPrivPlain = await getKeyWrapper().unwrap(acct.rotationKeyPriv)
   const unsignedBlock = await encode(overlaid)
-  const sigBytes = signBytes(acct.rotationKeyPriv, unsignedBlock.bytes)
+  const sigBytes = signBytes(rotationKeyPrivPlain, unsignedBlock.bytes)
   const signed: SignedPlcOp = { ...overlaid, sig: base64url(sigBytes) }
   const signedBlock = await encode(signed)
   const nextSeq = latest.seq + 1

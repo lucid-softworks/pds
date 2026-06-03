@@ -29,6 +29,7 @@ import { db } from '~/lib/db'
 import { accounts, plcOperations, reservedKeys } from '~/lib/db/schema'
 import { getConfig } from '~/lib/config'
 import { generateKeypair } from '~/pds/repo/keys'
+import { getKeyWrapper } from '~/pds/auth/key_wrap'
 import { createGenesisRepo } from '~/pds/repo/repo'
 import {
   assertValidHandle,
@@ -123,14 +124,20 @@ export async function createAccount(
 
     // ── 6. Insert account row FIRST. Once this lands the FK in
     //      plc_operations is satisfied, so step 6c can write the PLC log.
+    //      Wrap the private scalars per the configured `PDS_KEY_WRAP`
+    //      backend (chapter 18). In dev that's a no-op `plain:` prefix;
+    //      in prod it's `gcm:` (or a future `kms:`).
+    const wrapper = getKeyWrapper()
+    const signingPrivWrapped = await wrapper.wrap(signingKey.privateKeyHex)
+    const rotationPrivWrapped = await wrapper.wrap(rotationKey.privateKeyHex)
     await db.insert(accounts).values({
       did,
       handle: input.handle,
       email: input.email,
       passwordHash,
-      signingKeyPriv: signingKey.privateKeyHex,
+      signingKeyPriv: signingPrivWrapped,
       signingKeyPub: signingKey.publicKeyMultibase,
-      rotationKeyPriv: rotationKey.privateKeyHex,
+      rotationKeyPriv: rotationPrivWrapped,
       rotationKeyPub: rotationKey.publicKeyMultibase,
     })
 
@@ -251,13 +258,22 @@ async function createMigratingAccount(
   const passwordHash = await hashPassword(input.password)
   const opBlock = await encode(plcOp)
 
+  // The reserved row may have been written by an older PDS process that ran
+  // before key-wrap landed — so we unwrap it through the dispatcher (which
+  // accepts bare hex as legacy plaintext) and re-wrap with the *current*
+  // backend. That way the account row lands with whatever wrap the
+  // operator currently has configured.
+  const wrapper = getKeyWrapper()
+  const reservedPlain = await wrapper.unwrap(reserved.signingKeyPriv)
+  const signingPrivWrapped = await wrapper.wrap(reservedPlain)
+
   try {
     await db.insert(accounts).values({
       did,
       handle: input.handle,
       email: input.email,
       passwordHash,
-      signingKeyPriv: reserved.signingKeyPriv,
+      signingKeyPriv: signingPrivWrapped,
       signingKeyPub: reserved.signingKeyPub,
       // The user keeps custody of the rotation key in a migration. We have
       // no copy of theirs — and won't, since the destination must never be
@@ -265,6 +281,10 @@ async function createMigratingAccount(
       // string as a "no rotation key on this side" sentinel; the columns
       // are NOT NULL but the migration spec says we never use them on the
       // destination. A future schema bump should make these nullable.
+      //
+      // Empty stays empty: we don't run it through `wrap()` because a
+      // `plain:` prefix on an empty value would defeat the
+      // `acct.rotationKeyPriv.length === 0` check in signPlcOperation.
       rotationKeyPriv: '',
       rotationKeyPub: '',
       status: 'deactivated',

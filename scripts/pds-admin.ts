@@ -21,6 +21,7 @@ import { db } from '~/lib/db'
 import { accounts, inviteCodes } from '~/lib/db/schema'
 import { createAccount } from '~/pds/account/create'
 import { createOneInviteCode } from '~/pds/account/invites'
+import { getKeyWrapper } from '~/pds/auth/key_wrap'
 import { emitAccount, emitTombstone } from '~/pds/sequencer/sequence'
 
 const COMMANDS = [
@@ -33,6 +34,7 @@ const COMMANDS = [
   'delete',
   'mint-invite',
   'list-invites',
+  'reencrypt-keys',
   'help',
 ] as const
 
@@ -68,6 +70,8 @@ async function main(): Promise<void> {
       return await cmdMintInvite(rest)
     case 'list-invites':
       return await cmdListInvites()
+    case 'reencrypt-keys':
+      return await cmdReencryptKeys(rest)
     case 'help':
       printHelp()
   }
@@ -89,6 +93,15 @@ Account state machine:
 Invites (gate via PDS_INVITE_REQUIRED=true):
   mint-invite [--for <did>] [--uses <n>]   Create one code
   list-invites                  All codes + their use counts
+
+At-rest signing-key wrap (chapter 18 — KeyWrapper):
+  reencrypt-keys [--dry-run]    Re-wrap every account row's signing/rotation
+                                keys with the currently-configured backend
+                                (PDS_KEY_WRAP). Walks the accounts table,
+                                unwraps each row through the dispatcher
+                                (handles mixed plain/gcm rows), re-wraps
+                                with the active backend, UPDATEs in place.
+                                With --dry-run prints what would change.
 
 Examples:
   pnpm pds-admin create-account
@@ -265,6 +278,87 @@ async function cmdListInvites(): Promise<void> {
       `${status} ${row.code}   ${row.usesRemaining}/${row.usesRemaining + row.usesTotal} left   ${target}\n`,
     )
   }
+}
+
+async function cmdReencryptKeys(args: string[]): Promise<void> {
+  // The dispatcher in `~/pds/auth/key_wrap` reads any backend's format —
+  // we don't care what the rows currently look like, only that we can
+  // unwrap them. The current PDS_KEY_WRAP selects the *write* backend;
+  // every row that doesn't already use it gets rewritten in place.
+  const parsed = parseArgs({
+    args,
+    options: { 'dry-run': { type: 'boolean', default: false } },
+    allowPositionals: true,
+  })
+  const dryRun = parsed.values['dry-run'] === true
+  const wrapper = getKeyWrapper()
+
+  const rows = await db
+    .select({
+      did: accounts.did,
+      handle: accounts.handle,
+      signingKeyPriv: accounts.signingKeyPriv,
+      rotationKeyPriv: accounts.rotationKeyPriv,
+    })
+    .from(accounts)
+
+  if (rows.length === 0) {
+    info('no accounts to re-encrypt')
+    return
+  }
+
+  let rewritten = 0
+  let unchanged = 0
+  for (const row of rows) {
+    const signingNew = await rewrap(wrapper, row.signingKeyPriv)
+    // Migrating-in accounts persist an empty string as a "no rotation key
+    // on this side" sentinel — leave it alone, same as createAccount does.
+    const rotationNew =
+      row.rotationKeyPriv.length === 0
+        ? ''
+        : await rewrap(wrapper, row.rotationKeyPriv)
+    const signingChanged = signingNew !== row.signingKeyPriv
+    const rotationChanged = rotationNew !== row.rotationKeyPriv
+    if (!signingChanged && !rotationChanged) {
+      unchanged++
+      continue
+    }
+    rewritten++
+    if (dryRun) {
+      info(
+        `would update ${row.handle} (${row.did}): ` +
+          `${describeChange('signing', signingChanged)}` +
+          `${signingChanged && rotationChanged ? ', ' : ''}` +
+          `${describeChange('rotation', rotationChanged)}`,
+      )
+      continue
+    }
+    await db
+      .update(accounts)
+      .set({
+        signingKeyPriv: signingNew,
+        rotationKeyPriv: rotationNew,
+      })
+      .where(eq(accounts.did, row.did))
+  }
+
+  if (dryRun) {
+    ok(`dry run: ${rewritten} row(s) would change, ${unchanged} already current`)
+  } else {
+    ok(`${rewritten} row(s) re-encrypted, ${unchanged} already current`)
+  }
+}
+
+async function rewrap(
+  wrapper: ReturnType<typeof getKeyWrapper>,
+  stored: string,
+): Promise<string> {
+  const plain = await wrapper.unwrap(stored)
+  return await wrapper.wrap(plain)
+}
+
+function describeChange(field: string, changed: boolean): string {
+  return changed ? field : ''
 }
 
 function requireDid(value: string | undefined): string {

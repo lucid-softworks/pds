@@ -239,6 +239,7 @@ export async function runPlcRotationSelfTest(): Promise<{
   rotatedPrev: string | null
 }> {
   const { generateKeypair } = await import('~/pds/repo/keys')
+  const { getKeyWrapper } = await import('~/pds/auth/key_wrap')
   const signing = generateKeypair()
   const rotation = generateKeypair()
   const handle = `selftest-${Date.now()}.test`
@@ -251,16 +252,18 @@ export async function runPlcRotationSelfTest(): Promise<{
     pdsEndpoint: 'http://localhost:3000',
   })
 
-  // Insert a stub account row so the FK on plc_operations passes.
+  // Insert a stub account row so the FK on plc_operations passes. Private
+  // keys go through the configured at-rest wrapper — see chapter 18.
+  const wrapper = getKeyWrapper()
   const { accounts } = await import('~/lib/db/schema')
   await db.insert(accounts).values({
     did: genesis.did,
     handle,
     email: `${handle}@example.invalid`,
     passwordHash: 'selftest',
-    signingKeyPriv: signing.privateKeyHex,
+    signingKeyPriv: await wrapper.wrap(signing.privateKeyHex),
     signingKeyPub: signing.publicKeyMultibase,
-    rotationKeyPriv: rotation.privateKeyHex,
+    rotationKeyPriv: await wrapper.wrap(rotation.privateKeyHex),
     rotationKeyPub: rotation.publicKeyMultibase,
   })
 

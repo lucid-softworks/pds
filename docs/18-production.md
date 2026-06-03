@@ -26,6 +26,7 @@ swapped for production equivalents:
 | Backups | None | `pnpm pds:export` on a schedule, ch. 23 |
 | Observability | `console.log` | Structured logs, metrics, alerts |
 | Rate limiting | None in dev | `InMemoryRateLimitStore` + Redis swap for multi-replica |
+| DPoP replay | in-process LRU | `InMemoryDpopReplayStore` + Redis stub for multi-replica |
 
 We'll take each in turn.
 

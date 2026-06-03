@@ -24,6 +24,7 @@ import {
 } from '~/pds/did/handle'
 import { resolveLocalHandle } from '~/pds/did/resolver'
 import { rotatePlc } from '~/pds/did/plc'
+import { getKeyWrapper } from '~/pds/auth/key_wrap'
 import { emitIdentity } from '~/pds/sequencer/sequence'
 
 const InputSchema = z.object({
@@ -80,6 +81,16 @@ const handler: Handler = async ({ input, authorization, dpopProof, request }) =>
     throw InternalError('account row missing during rotation')
   }
 
+  // Unwrap the at-rest rotation key. Migrating-in accounts store an empty
+  // string as a "no rotation key on this side" sentinel — those callers
+  // route through `signPlcOperation` and never reach this handler.
+  if (acct.rotationKeyPriv.length === 0) {
+    throw InternalError('account has no rotation key on this PDS')
+  }
+  const rotationKeyPrivPlain = await getKeyWrapper().unwrap(
+    acct.rotationKeyPriv,
+  )
+
   // Append the rotate op + swap the handle column. In a single transaction
   // when the driver supports it; otherwise sequentially — the worst-case
   // failure mode is a PLC op without a matching handle update, which a
@@ -91,7 +102,7 @@ const handler: Handler = async ({ input, authorization, dpopProof, request }) =>
       const r = await rotatePlc({
         did: me.did,
         newHandle,
-        rotationKeyPriv: acct.rotationKeyPriv,
+        rotationKeyPriv: rotationKeyPrivPlain,
       })
       try {
         await tx
@@ -114,7 +125,7 @@ const handler: Handler = async ({ input, authorization, dpopProof, request }) =>
       rotated = await rotatePlc({
         did: me.did,
         newHandle,
-        rotationKeyPriv: acct.rotationKeyPriv,
+        rotationKeyPriv: rotationKeyPrivPlain,
       })
       try {
         await db

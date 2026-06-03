@@ -20,6 +20,7 @@
 import { eq, and } from 'drizzle-orm'
 import { db } from '~/lib/db'
 import { accounts, repos, records, recordBlobs } from '~/lib/db/schema'
+import { getKeyWrapper } from '~/pds/auth/key_wrap'
 import {
   encode,
   parseCid,
@@ -194,13 +195,18 @@ export async function applyWrites(args: {
   const { cid: newMstRoot, blocks: mstBlocks } = await mst.getRoot()
   newBlocks.push(...mstBlocks)
 
-  // 7. Build the signed commit.
+  // 7. Build the signed commit. The DB column is wrapped at rest (see
+  //    `~/pds/auth/key_wrap`); we unwrap through the dispatcher, which
+  //    handles `plain:`, `gcm:`, bare-hex legacy rows, etc.
   const rev = nextTid()
+  const signingKeyPrivPlain = await getKeyWrapper().unwrap(
+    account.signingKeyPriv,
+  )
   const commitBlock = await buildSignedCommit({
     did: args.did,
     data: newMstRoot,
     rev,
-    signingKeyPriv: account.signingKeyPriv,
+    signingKeyPriv: signingKeyPrivPlain,
   })
   newBlocks.push(commitBlock)
 

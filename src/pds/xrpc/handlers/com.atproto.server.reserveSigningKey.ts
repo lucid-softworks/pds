@@ -20,6 +20,7 @@ import { BadRequest } from '../errors'
 import { db } from '~/lib/db'
 import { reservedKeys } from '~/lib/db/schema'
 import { generateKeypair } from '~/pds/repo/keys'
+import { getKeyWrapper } from '~/pds/auth/key_wrap'
 import { optionalAccessAuth } from '~/pds/auth/middleware'
 
 const InputSchema = z.object({
@@ -47,6 +48,11 @@ const handler: Handler = async ({ input, authorization }) => {
   }
 
   const key = generateKeypair()
+  // The reserved row holds the same flavour of at-rest private key as the
+  // accounts row will: wrapped through the configured backend. Migrating-in
+  // accounts copy this value over to `accounts.signing_key_priv` (which
+  // re-wraps with the then-current backend, so a flip in between is fine).
+  const wrappedPriv = await getKeyWrapper().wrap(key.privateKeyHex)
   // Last reservation wins — if the user re-runs the migration dance, the
   // earlier reserved key is forgotten and they put the new one in the rotate
   // op. The orphan private key is harmless (never linked to an account).
@@ -54,13 +60,13 @@ const handler: Handler = async ({ input, authorization }) => {
     .insert(reservedKeys)
     .values({
       did,
-      signingKeyPriv: key.privateKeyHex,
+      signingKeyPriv: wrappedPriv,
       signingKeyPub: key.publicKeyMultibase,
     })
     .onConflictDoUpdate({
       target: reservedKeys.did,
       set: {
-        signingKeyPriv: key.privateKeyHex,
+        signingKeyPriv: wrappedPriv,
         signingKeyPub: key.publicKeyMultibase,
         reservedAt: new Date(),
       },

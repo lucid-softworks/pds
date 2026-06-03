@@ -39,6 +39,11 @@ export type PdsConfig = {
    *  Default false — scrape endpoints are sensitive; opt in deliberately and
    *  wrap them behind a reverse proxy ACL. See chapter 18. */
   metricsEnabled: boolean
+  /** Backend for the DPoP `jti` replay store. 'in-memory' (default) is a
+   *  single-process Map; 'redis' selects the stub backend that documents
+   *  the SETNX EX 60 pattern but throws on first use. Wire a real Redis
+   *  client in if you run multi-replica. See chapter 21 — OAuth. */
+  dpopReplayStoreKind: 'in-memory' | 'redis'
 }
 
 let cached: PdsConfig | null = null
@@ -77,6 +82,8 @@ export function getConfig(): PdsConfig {
     oauthSigningKey,
     logLevel: resolveLogLevel(),
     metricsEnabled: process.env.PDS_METRICS === 'true',
+    dpopReplayStoreKind:
+      process.env.PDS_DPOP_REPLAY_STORE === 'redis' ? 'redis' : 'in-memory',
   }
   return cached
 }
