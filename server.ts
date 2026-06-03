@@ -24,6 +24,7 @@ import { extname, join, normalize, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import { serve } from 'srvx'
 import { WebSocketServer } from 'ws'
+import { corsPreflight, withCors } from './src/lib/cors'
 import { closeDb } from './src/lib/db'
 import { getLogger } from './src/lib/logger'
 import { onShutdown } from './src/lib/shutdown'
@@ -106,6 +107,15 @@ function serveStatic(url: URL): Response | null {
 }
 
 async function handler(request: Request): Promise<Response> {
+  // Browsers preflight every cross-origin XRPC/OAuth/etc. request with
+  // OPTIONS before sending the real method. Short-circuit at the edge so
+  // we don't have to remember CORS in every route file; the real handler
+  // never sees the preflight.
+  if (request.method === 'OPTIONS') return corsPreflight()
+  return withCors(await innerHandler(request))
+}
+
+async function innerHandler(request: Request): Promise<Response> {
   const url = new URL(request.url)
   const isStaticCandidate =
     request.method === 'GET' || request.method === 'HEAD'

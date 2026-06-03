@@ -81,13 +81,42 @@ for path in "${SMOKE_PATHS[@]}"; do
   fi
 done
 
+echo
+echo "==> CORS spot-checks (bsky.app and the like fetch us cross-origin)"
+# Preflight on the XRPC route.
+preflight_headers=$(curl -sI -X OPTIONS \
+  -H 'origin: https://bsky.app' \
+  -H 'access-control-request-method: POST' \
+  -H 'access-control-request-headers: authorization' \
+  --max-time 5 \
+  "http://127.0.0.1:3000/xrpc/com.atproto.server.describeServer")
+if grep -qi '^access-control-allow-origin:' <<<"$preflight_headers"; then
+  echo "  ok   OPTIONS preflight on /xrpc returns ACAO"
+else
+  echo "  FAIL OPTIONS preflight on /xrpc missing ACAO"
+  echo "$preflight_headers" | sed 's/^/    /'
+  fail=$((fail + 1))
+fi
+# Real request — verify the header survives the response wrap.
+real_headers=$(curl -sI \
+  -H 'origin: https://bsky.app' \
+  --max-time 5 \
+  "http://127.0.0.1:3000/.well-known/did.json")
+if grep -qi '^access-control-allow-origin:' <<<"$real_headers"; then
+  echo "  ok   GET .well-known/did.json returns ACAO"
+else
+  echo "  FAIL GET .well-known/did.json missing ACAO"
+  echo "$real_headers" | sed 's/^/    /'
+  fail=$((fail + 1))
+fi
+
 if [ "$fail" -gt 0 ]; then
   echo
-  echo "!! $fail endpoint(s) failed; server log:"
+  echo "!! $fail check(s) failed; server log:"
   echo "----"
   cat "$LOG_FILE"
   echo "----"
   exit 1
 fi
 
-echo "==> all $(printf '%s\n' "${SMOKE_PATHS[@]}" | wc -l | tr -d ' ') endpoints OK"
+echo "==> all checks OK"

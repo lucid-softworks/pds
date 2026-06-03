@@ -289,6 +289,41 @@ The next two steps — finish transcribing the stubs and replace the
 zod schemas with lexicon-driven inputs — are chapter 9's "what's next."
 The seam already exists; the migration is mechanical.
 
+## Cross-origin requests
+
+Every real ATproto client — bsky.app, the official mobile apps, every
+alternate client — calls XRPC on this PDS from a **different origin**
+than the one hosting it. Browsers refuse to read the response unless
+the server explicitly opts in with `Access-Control-Allow-*` headers,
+so the PDS sets them on every response. The wiring lives at the edge,
+not per-route:
+
+- `src/lib/cors.ts` — the canonical header set (`*` origin, the methods
+  and headers ATproto clients actually send, the response headers
+  worth surfacing).
+- `server.ts` — wraps every prod response in `withCors()` and
+  short-circuits `OPTIONS` to a 204 preflight before the fetch handler
+  even sees it.
+- `src/lib/cors-vite-plugin.ts` — mirrors the same behaviour on the
+  Vite dev server so dev and prod don't disagree.
+
+Two things to know:
+
+1. **Allow-Origin is `*`, not `Origin` echoed back.** Safe because no
+   XRPC route reads cookies: auth is bearer-JWT in the `Authorization`
+   header. The combination of `Allow-Origin: *` and any credentialed
+   request is rejected by browsers anyway, so even if a future route
+   added cookies, this wouldn't accidentally leak them.
+2. **DPoP-Nonce and WWW-Authenticate are in `Expose-Headers`.** The
+   chapter-21 OAuth flows need clients to read those response headers
+   directly; without `Expose-Headers` the browser hides them from
+   JavaScript even when the request succeeded.
+
+If you add a new top-level route that isn't expected to be called by
+external clients (an admin-only HTML page, say), it still gets CORS for
+free — there's no harm, and removing it would be a per-route
+exception you'd have to remember.
+
 ## Try it
 
 The PDS exposes a tiny number of endpoints today; the full set will grow.
