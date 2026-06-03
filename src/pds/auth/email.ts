@@ -48,7 +48,14 @@ export async function issueEmailToken(args: {
 }): Promise<{ token: string; expiresAt: Date }> {
   const ttl = args.ttlSeconds ?? DEFAULT_TTL_SECONDS[args.purpose]
   const expiresAt = new Date(Date.now() + ttl * 1000)
-  const token = generateToken()
+  // The displayed token is uppercase (bsky.app's reset/confirm UIs
+  // present codes that way and auto-uppercase the input field). We
+  // store the lowercase form so the consumer's case-insensitive
+  // lookup compares apples-to-apples — see
+  // `consumeEmailTokenByToken`. The caller gets the displayed form
+  // back in the return value to put in the email body.
+  const displayToken = generateToken()
+  const storedToken = displayToken.toLowerCase()
 
   // Only one live token per (did, purpose). Drop any prior one before
   // inserting; without this an issuance-spam attacker could let a stale
@@ -65,12 +72,12 @@ export async function issueEmailToken(args: {
   await db.insert(emailTokens).values({
     did: args.did,
     purpose: args.purpose,
-    token,
+    token: storedToken,
     newEmail: args.newEmail ?? null,
     expiresAt,
   })
 
-  return { token, expiresAt }
+  return { token: displayToken, expiresAt }
 }
 
 export async function consumeEmailToken(args: {
