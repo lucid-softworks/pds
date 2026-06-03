@@ -1,0 +1,14 @@
+node_modules
+dist
+.output
+.tanstack
+.vinxi
+.nitro
+.cache
+.pglite
+.blobs
+coverage
+src/routeTree.gen.ts
+src/pds/lexicon/bundled
+drizzle/*.sql
+pnpm-lock.yaml
