@@ -6,14 +6,14 @@
 //   handle         (string, required)  ← supported
 //   email          (string, optional)  ← required in our impl
 //   password       (string, optional)  ← required in our impl
-//   did            (string, optional)  — pre-existing DID for migration
-//   inviteCode     (string, optional)  — closed-signup mode
+//   did            (string, optional)  ← supported (migration; ch. 20)
+//   inviteCode     (string, optional)  ← supported (ch. 12 — Invite codes)
 //   recoveryKey    (string, optional)  — caller-controlled rotation key
-//   plcOp          (object, optional)  — pre-built genesis op
+//   plcOp          (object, optional)  ← supported (migration; ch. 20)
 //
-// We'll implement migration / invite codes / recovery keys in follow-on
-// chapters. The flow that ships here is the simplest one: a brand new
-// self-hosted account.
+// Two distinct entry points share this endpoint: a brand-new self-hosted
+// account (no `did`), and a migrating-in account (caller supplies the
+// existing `did` plus a signed `plcOp`). See chapters 12 and 20.
 
 import { z } from 'zod'
 import type { Handler, HandlerDef } from '../server'
@@ -25,6 +25,12 @@ const InputSchema = z.object({
   email: z.string().min(1),
   password: z.string().min(1),
   inviteCode: z.string().min(1).optional(),
+  // Narrow did:plc shape; broaden when did:web migration lands.
+  did: z
+    .string()
+    .regex(/^did:plc:[a-z2-7]{24}$/)
+    .optional(),
+  plcOp: z.record(z.unknown()).optional(),
 })
 
 const handler: Handler = async ({ input }) => {

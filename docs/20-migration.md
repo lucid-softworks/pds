@@ -29,10 +29,10 @@ Destination side:
 - `com.atproto.server.reserveSigningKey` — new. Holds a server-generated
   signing key for a soon-to-arrive DID so the migrating user can stitch
   it into their PLC rotate op.
-- `com.atproto.server.createAccount` — chapter 12. **Today's
-  implementation doesn't yet accept a pre-existing DID + plcOp**, so the
-  destination side is not yet a full end-to-end story. We document the
-  gap below.
+- `com.atproto.server.createAccount` — chapter 12. Accepts a pre-existing
+  `did` + signed `plcOp` and parks the account in `deactivated` state
+  until `importRepo` lands the bytes. See "Receiving a migrating account"
+  below.
 - `com.atproto.repo.importRepo` — new. Takes the CAR the user downloaded
   from the source and ingests it as the destination repo's state.
 - `com.atproto.sync.listMissingBlobs` — new. Reports the blob CIDs the
@@ -79,9 +79,14 @@ her client follows:
    60 seconds. The token lets the destination present *Alice's authority*
    to the source when it pulls.
 6. **Create the destination account.** `POST /xrpc/com.atproto.server.createAccount`
-   with Alice's existing DID and the signed plcOp from step 3. ⚠️ Our
-   `createAccount` doesn't accept `did` or `plcOp` yet — see the gap
-   below.
+   with Alice's existing DID and the signed plcOp from step 3. The
+   destination validates the op (the `atproto` verification method must
+   match the key we just reserved; the service endpoint must match our
+   `publicUrl`; the handle in `alsoKnownAs[0]` must match the request),
+   persists it as the local PLC genesis (seq 0 — the upstream chain
+   stays on the old PDS), consumes the reservation, inserts the account
+   row with `status='deactivated'` and `migration_state='migrating-in'`,
+   and hands back a session.
 7. **Download the source repo as a CAR.** `GET /xrpc/com.atproto.sync.getRepo?did=...`,
    carrying the service token from step 5 as `Authorization: Bearer ...`.
    The response is a CAR of every block reachable from the current commit.
@@ -121,10 +126,12 @@ key (the account row doesn't exist), waiting for a future
 `createAccount` call that recognizes a pre-existing DID and pulls the
 reservation in.
 
-> ⚠️ **The pull-in isn't wired up.** See the gap section. Today the
-> reservation is correct on the schema level and `reserveSigningKey`
-> returns the right public key, but `createAccount` still generates a
-> fresh key instead of consuming the reservation.
+The reservation is consumed by `createAccount` once the user shows up
+with their DID + signed `plcOp`. At that point the private key moves from
+`reserved_keys.signing_key_priv` to `accounts.signing_key_priv` and the
+reserved row is deleted. If the user never returns, the orphaned row sits
+harmlessly until a re-run of `reserveSigningKey` overwrites it (or until
+operator cleanup prunes stale reservations).
 
 The user's *rotation* key is a different story. That key controls future
 PLC operations against the DID; the user keeps it (in their client, on
@@ -280,55 +287,100 @@ multiple record_blobs rows (one record might use it twice via embed
 unions), but the user only has to upload it once, so a tiny amount of
 client-side dedup is fine.
 
-## The gaps
+## Receiving a migrating account
 
-This chapter ships four endpoints, the schema groundwork, and the
-firehose hook. It deliberately leaves three things unsolved.
-
-### 1. `createAccount` doesn't accept a pre-existing DID
-
-Step 6 of the choreography needs the destination to skip key generation
-and PLC op signing, take the user-supplied DID + plcOp, and use the
-reserved signing key. The orchestrator in `src/pds/account/create.ts`
-currently does steps 3 and 4 unconditionally. The diff:
+`createAccount` now branches on `input.did`. When the caller passes one,
+the orchestrator drops into a second path implemented alongside the
+fresh-account one in `src/pds/account/create.ts`:
 
 ```ts
-// Pseudo-diff against createAccount
-if (input.did) {
-  // Migrating in.
-  const reservation = await db
-    .select()
-    .from(reservedKeys)
-    .where(eq(reservedKeys.did, input.did))
-    .limit(1)
-  if (!reservation[0]) {
-    throw BadRequest('no signing key reserved for ' + input.did)
-  }
-  signingKey = {
-    privateKeyHex: reservation[0].signingKeyPriv,
-    publicKeyMultibase: reservation[0].signingKeyPub,
-    didKey: 'did:key:' + reservation[0].signingKeyPub,
-  }
-  if (!input.plcOp) throw BadRequest('plcOp required for migration')
-  // Verify the plcOp's verificationMethods.atproto matches our reserved
-  // signing key, then persist it as the genesis op of this DID.
-  await persistPlcOp(input.did, input.plcOp)
-  // Skip the empty-repo creation — importRepo will populate.
-  await db.insert(accounts).values({ did: input.did, ... })
-  // Account starts deactivated; activates after importRepo + blobs land.
-  await db.update(accounts).set({ status: 'deactivated',
-    migrationState: 'migrating-in' }).where(eq(accounts.did, input.did))
-  return ...
+if (input.did !== undefined) {
+  return createMigratingAccount(input, input.did)
 }
 ```
 
-The same orchestrator covers both cases; the migrating branch just
-replaces "generate keys + PLC op" with "look up reservation + accept
-plcOp." We left it as a follow-up to keep this chapter focused on the
-new endpoints. The schema and the reserved-key flow are already in
-place; finishing the wiring is a single file change.
+The migrating branch does:
 
-### 2. PLC rotation is local-only
+1. **Reject non-`did:plc`.** Today we only migrate did:plc identifiers;
+   did:web migration would skip the PLC log entirely and is left as a
+   future exercise. The handler's zod schema enforces this with a
+   `^did:plc:[a-z2-7]{24}$` regex so malformed input never reaches the
+   orchestrator.
+2. **Reject existing accounts.** `SELECT did FROM accounts WHERE did=?`
+   guards against the user (or a racer) double-migrating. Surfaces as
+   `AccountAlreadyExists`.
+3. **Pull the reservation.** `SELECT * FROM reserved_keys WHERE did=?`.
+   Absent → `MissingReservedKey` (the user skipped step 2 of the
+   choreography). The row contains the keypair we generated earlier;
+   the public half is what the user should have put in their PLC op.
+4. **Validate the PLC op.** The op must be a `plc_operation` with a
+   non-empty `sig`, a *non-null* `prev` (it's a rotate, not a genesis),
+   non-empty `rotationKeys`, a `verificationMethods.atproto` that equals
+   `did:key:<reserved.signingKeyPub>` (`MismatchedSigningKey`), and a
+   `services.atproto_pds.endpoint` that equals our `publicUrl`
+   (`MismatchedServiceEndpoint`). `alsoKnownAs[0]` must be
+   `at://<input.handle>`. Anything else flunks with `IncompatibleDidDoc`.
+5. **Skip signature verification.** Documented below. We trust the
+   structural binding to the reserved key in local-PLC mode.
+6. **Hash the password** and **DAG-CBOR encode the op** outside the
+   transactional window so async work that can throw doesn't leave half
+   a row behind.
+7. **INSERT the account row** with `status='deactivated'`,
+   `migration_state='migrating-in'`, and the reserved signing key on
+   the row. The rotation-key columns are stored as empty strings —
+   migrations leave the rotation key with the user, and the destination
+   has no business holding one.
+8. **INSERT the PLC op** at `seq=0`. We don't reconstruct the upstream
+   chain locally; the migrating-in account's local PLC log starts here.
+   A future `PDS_LOCAL_PLC=false` mode would publish to plc.directory
+   instead.
+9. **DELETE the reservation row.** The keypair lives on the account row
+   now.
+10. **Emit firehose events.** `#identity` with the handle binding, then
+    `#account { active: false, status: 'deactivated' }` so consumers
+    know the DID landed but the repo hasn't.
+11. **Issue session tokens.** The user uses these to call `importRepo`
+    next. No genesis repo is created — `importRepo` is the one that
+    populates `repos` + `repo_blocks`.
+
+The return shape is identical to the fresh-account path: `{ did, handle,
+accessJwt, refreshJwt, didDoc }`. The `didDoc` we return is rendered
+locally from the reserved signing key and our `publicUrl` — it matches
+what `plc.directory` would now serve given the rotate op the user just
+published upstream.
+
+### What about the PLC signature?
+
+We **don't** verify `plcOp.sig` against the previous op's rotation key.
+A proper verification path looks like:
+
+```
+prev_op = plc.directory.resolve(did, plcOp.prev)
+verify(prev_op.rotationKeys[i], canonical_bytes(plcOp - sig), plcOp.sig)
+```
+
+Both pieces are absent in local-PLC mode: there's no plc.directory
+client wired up, and the upstream PDS doesn't ship its `plc_operations`
+rows to the destination. We catch the wrong-key cases that *do* matter
+to this PDS through the structural checks above — if `plcOp` doesn't
+list our reserved key under `verificationMethods.atproto`, the imported
+commits won't verify against `accounts.signing_key_pub` in `importRepo`
+and the migration falls over with `InvalidRequest`. That's a different
+guarantee than upstream PLC's (signature chains back to a valid prior
+rotation key) but it's the load-bearing one for *this* PDS: the only
+key that can sign repo writes is the one we generated and gave to the
+user to put in the op.
+
+A future chapter that flips `PDS_LOCAL_PLC=false` adds the
+plc.directory verification at the same point.
+
+## The gaps
+
+This chapter ships four endpoints, the destination-side `createAccount`
+branch, the schema groundwork, and the firehose hook. It deliberately
+leaves two things unsolved.
+
+### 1. PLC rotation is local-only
 
 The choreography's step 4 says "publish the rotate op." In our local-PLC
 mode, that means appending to `plc_operations`. But `plc_operations`
@@ -343,7 +395,7 @@ Fixing it means flipping `PDS_LOCAL_PLC=false` and pointing at the real
 directory; chapter 18 covers the env switch. The local-only PLC was
 always a dev shortcut; migration is the workload that exposes its limit.
 
-### 3. `getServiceAuth` uses HS256 instead of ES256K
+### 2. `getServiceAuth` uses HS256 instead of ES256K
 
 Covered above. The shape of the token is right; the signing algorithm
 isn't. The receiver of an HS256 token has to share the secret with the
@@ -379,45 +431,162 @@ unexpected places as concurrent uploads complete).
 
 ## Try it (one-PDS double-act)
 
-Without two PDSes running we can still exercise most of the surface by
-playing both sides on one process. The commands below assume the PDS is
-up at `localhost:3000` and you've created an account `alice.test`. We'll
-*pretend* to migrate her to a new account `bob.test` on the same PDS.
+Without two PDSes running we can still exercise the full migration
+surface by playing both sides on one process. The PDS is at
+`localhost:3000`, you've created `alice.test`, and you've written a few
+records to her repo. The goal is to migrate Alice's DID — same DID,
+same followers — to a fresh row with handle `alice-moved.test` on the
+same PDS. (In a real two-PDS setup the handle would stay the same; we
+rename here because both accounts share one `accounts` table and the
+handle column is unique.)
 
-```bash
-# 1. Log in as Alice and grab a service token.
-ALICE_JWT=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createSession \
-  -H "content-type: application/json" \
-  -d '{"identifier":"alice.test","password":"correcthorsebatterystaple"}' \
-  | jq -r .accessJwt)
+The choreography normally lives in the user's client. We'll script it
+inline with `pnpm tsx`. Save the helper below as `/tmp/migrate.ts`:
 
-SERVICE_TOKEN=$(curl -s "http://localhost:3000/xrpc/com.atproto.server.getServiceAuth?aud=did:web:localhost&lxm=com.atproto.sync.getRepo" \
-  -H "Authorization: Bearer $ALICE_JWT" | jq -r .token)
-echo $SERVICE_TOKEN
+```ts
+// /tmp/migrate.ts — one-shot client for the migrating-in choreography.
+import { db } from '~/lib/db'
+import { accounts, plcOperations } from '~/lib/db/schema'
+import { decode, encode } from '~/pds/codec'
+import { signBytes } from '~/pds/repo/keys'
+import { eq, desc } from 'drizzle-orm'
 
-# 2. Reserve a signing key for a pretend new DID.
-curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.reserveSigningKey \
-  -H "content-type: application/json" \
-  -d '{"did":"did:plc:pretend-migrating-account"}' | jq
+const [, , aliceDid, newHandle, reservedKeyMultibase] = process.argv
+if (!aliceDid || !newHandle || !reservedKeyMultibase) {
+  console.error('usage: migrate.ts <aliceDid> <newHandle> <reservedKey>')
+  process.exit(1)
+}
 
-# 3. Download Alice's repo as a CAR.
-ALICE_DID=$(curl -s http://localhost:3000/xrpc/com.atproto.server.getSession \
-  -H "Authorization: Bearer $ALICE_JWT" | jq -r .did)
-curl -s "http://localhost:3000/xrpc/com.atproto.sync.getRepo?did=$ALICE_DID" \
-  -o alice.car
-ls -la alice.car
+// 1. Pull Alice's rotation key + previous op out of Postgres. In a real
+//    migration the rotation key lives in the user's wallet; we cheat here
+//    because the fresh-account path generated it for us.
+const [acc] = await db
+  .select({ rotationKeyPriv: accounts.rotationKeyPriv })
+  .from(accounts)
+  .where(eq(accounts.did, aliceDid))
+  .limit(1)
+if (!acc) throw new Error('account not found')
 
-# 4. ⚠️ Skipped: createAccount with pre-existing DID. Until that lands, we
-#    can't actually receive the import on a fresh account from a second
-#    user session in the same process.
+const [prevOp] = await db
+  .select({ cid: plcOperations.cid })
+  .from(plcOperations)
+  .where(eq(plcOperations.did, aliceDid))
+  .orderBy(desc(plcOperations.seq))
+  .limit(1)
+if (!prevOp) throw new Error('no prior PLC op')
 
-# 5. List missing blobs (will be empty if Alice has no records yet).
-curl -s http://localhost:3000/xrpc/com.atproto.sync.listMissingBlobs \
-  -H "Authorization: Bearer $ALICE_JWT" | jq
+// 2. Re-derive Alice's *current* rotation did:key so we can echo it back.
+const prevBytes = (
+  await db
+    .select({ op: plcOperations.operation })
+    .from(plcOperations)
+    .where(eq(plcOperations.did, aliceDid))
+    .orderBy(desc(plcOperations.seq))
+    .limit(1)
+)[0]!.op
+const prev = await decode<{ rotationKeys: string[] }>(prevBytes)
+
+// 3. Build + sign the rotate op.
+const unsigned = {
+  type: 'plc_operation' as const,
+  rotationKeys: prev.rotationKeys,
+  verificationMethods: { atproto: 'did:key:' + reservedKeyMultibase },
+  alsoKnownAs: [`at://${newHandle}`],
+  services: {
+    atproto_pds: {
+      type: 'AtprotoPersonalDataServer',
+      endpoint: 'http://localhost:3000',
+    },
+  },
+  prev: prevOp.cid,
+}
+const block = await encode(unsigned)
+const sig = signBytes(acc.rotationKeyPriv, block.bytes)
+const b64 = Buffer.from(sig)
+  .toString('base64')
+  .replace(/\+/g, '-')
+  .replace(/\//g, '_')
+  .replace(/=+$/, '')
+console.log(JSON.stringify({ ...unsigned, sig: b64 }))
 ```
 
-The full e2e (createAccount → importRepo → listMissingBlobs → uploadBlob
-→ activateAccount) lights up once the createAccount follow-up lands.
+Then drive the flow:
+
+```bash
+# 0. Log in as Alice, grab a service token, snapshot her DID.
+ALICE_JWT=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createSession \
+  -H 'content-type: application/json' \
+  -d '{"identifier":"alice.test","password":"correcthorsebatterystaple"}' \
+  | jq -r .accessJwt)
+ALICE_DID=$(curl -s http://localhost:3000/xrpc/com.atproto.server.getSession \
+  -H "Authorization: Bearer $ALICE_JWT" | jq -r .did)
+SERVICE_TOKEN=$(curl -s \
+  "http://localhost:3000/xrpc/com.atproto.server.getServiceAuth?aud=did:web:localhost&lxm=com.atproto.sync.getRepo" \
+  -H "Authorization: Bearer $ALICE_JWT" | jq -r .token)
+
+# 1. Reserve a signing key on the destination for Alice's DID.
+RESERVED_KEY=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.reserveSigningKey \
+  -H 'content-type: application/json' \
+  -d "{\"did\":\"$ALICE_DID\"}" | jq -r .signingKey)
+
+# 2. Build + sign the PLC rotate op with the helper.
+PLC_OP=$(pnpm --silent tsx /tmp/migrate.ts "$ALICE_DID" alice-moved.test "$RESERVED_KEY")
+
+# 3. Download Alice's repo from the "source".
+curl -s "http://localhost:3000/xrpc/com.atproto.sync.getRepo?did=$ALICE_DID" \
+  -H "Authorization: Bearer $SERVICE_TOKEN" -o /tmp/alice.car
+
+# 4. Tear down Alice's source row so the destination INSERT can land
+#    (one-process limitation: the DID is a primary key).
+pnpm --silent tsx -e "
+  import('~/lib/db').then(async ({ db }) => {
+    const { accounts } = await import('~/lib/db/schema')
+    const { eq } = await import('drizzle-orm')
+    await db.delete(accounts).where(eq(accounts.did, '$ALICE_DID'))
+  })
+"
+
+# 5. Create the destination account with Alice's DID + signed op.
+DEST=$(curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createAccount \
+  -H 'content-type: application/json' \
+  -d "{
+    \"handle\": \"alice-moved.test\",
+    \"email\": \"alice+moved@example.com\",
+    \"password\": \"correcthorsebatterystaple\",
+    \"did\": \"$ALICE_DID\",
+    \"plcOp\": $PLC_OP
+  }")
+DEST_JWT=$(echo "$DEST" | jq -r .accessJwt)
+
+# 6. Import the CAR.
+curl -s -X POST http://localhost:3000/xrpc/com.atproto.repo.importRepo \
+  -H "Authorization: Bearer $DEST_JWT" \
+  -H 'content-type: application/vnd.ipld.car' \
+  --data-binary @/tmp/alice.car
+
+# 7. Listed missing blobs (empty for the simple case).
+curl -s http://localhost:3000/xrpc/com.atproto.sync.listMissingBlobs \
+  -H "Authorization: Bearer $DEST_JWT" | jq
+
+# 8. Activate.
+curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.activateAccount \
+  -H "Authorization: Bearer $DEST_JWT"
+```
+
+After step 8, `accounts.status` is `active` and `migration_state`
+remains `migrating-in` so downstream consumers know this account
+landed via migration rather than fresh signup. The firehose has
+emitted, in order: `#identity`, `#account { active: false,
+status: 'deactivated' }`, `#commit` (the imported tree), and
+`#account { active: true }`.
+
+> 📖 **One-process shortcuts.** Step 4 deletes the source row because
+> our DB collapses the two-PDS topology to one table. In a real
+> migration the source PDS keeps the row and later flips its
+> `migration_state` to `migrating-out` (gap 3 in the original list).
+> Step 2 pulls the rotation key out of Postgres because the
+> fresh-account flow generated it server-side; in a real migration the
+> rotation key lives in the user's client and never leaves it.
 
 ## Exercises
 

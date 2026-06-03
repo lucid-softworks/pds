@@ -15,11 +15,18 @@
 // flow in the records chapter. For now, if any step fails after the PLC op
 // is generated, we attempt a best-effort cleanup.
 //
+// When `input.did` is set, this function instead drives the *migrating-in*
+// flow: it adopts the caller-supplied DID, consumes a previously-reserved
+// signing key, persists the caller's signed PLC rotate op as the local
+// genesis, and inserts the account in a `deactivated` / `migrating-in`
+// state. The repo itself lands later via `importRepo`. See chapter 20 —
+// Migration.
+//
 // See chapter 12 — Account creation.
 
 import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db'
-import { accounts, plcOperations } from '~/lib/db/schema'
+import { accounts, plcOperations, reservedKeys } from '~/lib/db/schema'
 import { getConfig } from '~/lib/config'
 import { generateKeypair } from '~/pds/repo/keys'
 import { createGenesisRepo } from '~/pds/repo/repo'
@@ -29,11 +36,12 @@ import {
   InvalidHandleError,
 } from '~/pds/did/handle'
 import { createLocalPlc } from '~/pds/did/plc'
+import { encode } from '~/pds/codec'
 import { hashPassword } from '~/pds/auth/password'
 import { createSessionTokens } from '~/pds/auth/session'
 import { emitIdentity, emitAccount } from '~/pds/sequencer/sequence'
 import { buildDidDocument, type DidDocument } from '~/pds/did/document'
-import { BadRequest, Conflict, Unauthorized, XrpcError } from '~/pds/xrpc/errors'
+import { BadRequest, Conflict, Unauthorized } from '~/pds/xrpc/errors'
 import { peekInviteCode, reserveInviteCode } from './invites'
 
 export type CreateAccountInput = {
@@ -41,6 +49,9 @@ export type CreateAccountInput = {
   email: string
   password: string
   inviteCode?: string
+  // ── Migration fields (presence indicates a migrating-in account). ──
+  did?: string // pre-existing DID; we skip server-side derivation
+  plcOp?: unknown // caller-supplied signed PLC op as JSON
 }
 
 export type CreateAccountResult = {
@@ -64,16 +75,27 @@ export async function createAccount(
   //
   // We split the invite check in two: a non-mutating *peek* now, and the
   // decrement+audit *reserve* after the account row is in. The DID isn't
-  // known until step 4, so we can't enforce a `forAccount` recipient gate
-  // here — that check runs again under `reserveInviteCode` once we have a
-  // DID. The peek catches the common failures (unknown / disabled /
-  // exhausted) before we burn a PLC op.
+  // known until step 4 in the fresh-account branch, so we can't enforce a
+  // `forAccount` recipient gate here — that check runs again under
+  // `reserveInviteCode` once we have a DID. The peek catches the common
+  // failures (unknown / disabled / exhausted) before we burn a PLC op.
+  //
+  // Migrating-in accounts pay the same toll: a private PDS still requires an
+  // invite to receive a transfer.
   const cfg = getConfig()
   if (cfg.inviteRequired) {
     if (!input.inviteCode) {
       throw Unauthorized('invite code required', 'InvalidInviteCode')
     }
-    await peekInviteCode({ code: input.inviteCode, candidateDid: null })
+    await peekInviteCode({
+      code: input.inviteCode,
+      candidateDid: input.did ?? null,
+    })
+  }
+
+  // Branch: a caller-supplied DID means this is a migrating-in account.
+  if (input.did !== undefined) {
+    return createMigratingAccount(input, input.did)
   }
 
   // ── 3. Generate keys ───────────────────────────────────────────────────
@@ -151,6 +173,279 @@ export async function createAccount(
       () => {},
     )
     throw err
+  }
+}
+
+// ─── Migrating-in branch ─────────────────────────────────────────────────
+//
+// Bluesky's migration flow has the user (a) reserve a signing key on the
+// destination, (b) build + sign a PLC rotate op that points
+// `verificationMethods.atproto` at that key and `services.atproto_pds`
+// at the destination, and (c) hand both the DID and the signed op to
+// `createAccount`. We adopt the DID, consume the reservation, persist the
+// op as the local PLC genesis (seq=0 — we don't carry the upstream chain
+// across PDSes in local-PLC mode), and park the account in `deactivated`
+// state. The actual repository lands later through `importRepo`, which
+// flips the status to `active` once everything's verified.
+async function createMigratingAccount(
+  input: CreateAccountInput,
+  did: string,
+): Promise<CreateAccountResult> {
+  const cfg = getConfig()
+
+  if (!/^did:plc:[a-z2-7]{24}$/.test(did)) {
+    throw BadRequest(
+      'did must be a did:plc identifier',
+      'UnsupportedDidMethod',
+    )
+  }
+
+  const existing = await db
+    .select({ did: accounts.did })
+    .from(accounts)
+    .where(eq(accounts.did, did))
+    .limit(1)
+  if (existing[0]) {
+    throw Conflict(`account already exists for ${did}`, 'AccountAlreadyExists')
+  }
+
+  const reservedRows = await db
+    .select()
+    .from(reservedKeys)
+    .where(eq(reservedKeys.did, did))
+    .limit(1)
+  const reserved = reservedRows[0]
+  if (!reserved) {
+    throw BadRequest(
+      `no signing key reserved for ${did} — call reserveSigningKey first`,
+      'MissingReservedKey',
+    )
+  }
+  const reservedDidKey = 'did:key:' + reserved.signingKeyPub
+
+  // Structural + cross-field validation of the caller-supplied PLC op. We
+  // *don't* verify the signature against the previous op's rotation key —
+  // that would require a working plc.directory client (or the upstream
+  // PDS shipping us the prior chain). Documented in chapter 20.
+  const plcOp = validatePlcOp(input.plcOp, {
+    handle: input.handle,
+    expectedSigningDidKey: reservedDidKey,
+    expectedServiceEndpoint: cfg.publicUrl,
+  })
+
+  // Pre-compute everything that can throw before we touch the database.
+  const passwordHash = await hashPassword(input.password)
+  const opBlock = await encode(plcOp)
+
+  try {
+    await db.insert(accounts).values({
+      did,
+      handle: input.handle,
+      email: input.email,
+      passwordHash,
+      signingKeyPriv: reserved.signingKeyPriv,
+      signingKeyPub: reserved.signingKeyPub,
+      // The user keeps custody of the rotation key in a migration. We have
+      // no copy of theirs — and won't, since the destination must never be
+      // able to rotate the DID out from under the user. Persist an empty
+      // string as a "no rotation key on this side" sentinel; the columns
+      // are NOT NULL but the migration spec says we never use them on the
+      // destination. A future schema bump should make these nullable.
+      rotationKeyPriv: '',
+      rotationKeyPub: '',
+      status: 'deactivated',
+      migrationState: 'migrating-in',
+    })
+
+    if (cfg.inviteRequired && input.inviteCode) {
+      await reserveInviteCode({ code: input.inviteCode, usedBy: did })
+    }
+
+    // Persist the caller's signed op as the local genesis. We DAG-CBOR-encode
+    // the JSON-shaped op canonically here so the stored bytes match what a
+    // downstream reader would re-encode it to.
+    await db.insert(plcOperations).values({
+      did,
+      cid: opBlock.cid.toString(),
+      operation: opBlock.bytes,
+      seq: 0,
+    })
+
+    // Consume the reservation. The private half is now on the account row.
+    await db.delete(reservedKeys).where(eq(reservedKeys.did, did))
+
+    // No genesis repo: importRepo will populate `repos` + `repo_blocks`.
+    // Announce identity now so consumers know the handle binding; the
+    // account event flags `active: false` until activateAccount runs.
+    await emitIdentity({ did, handle: input.handle })
+    await emitAccount({ did, active: false, status: 'deactivated' })
+
+    const tokens = await createSessionTokens(did)
+
+    const didDoc = buildDidDocument({
+      did,
+      handle: input.handle,
+      signingKeyMultibase: reserved.signingKeyPub,
+      pdsEndpoint: cfg.publicUrl,
+    })
+
+    return {
+      did,
+      handle: input.handle,
+      ...tokens,
+      didDoc,
+    }
+  } catch (err) {
+    // Best-effort rollback. We don't restore the reserved row — if the
+    // delete already ran, the user should re-call reserveSigningKey to get
+    // a fresh reservation before retrying.
+    await db.delete(accounts).where(eq(accounts.did, did)).catch(() => {})
+    await db
+      .delete(plcOperations)
+      .where(eq(plcOperations.did, did))
+      .catch(() => {})
+    throw err
+  }
+}
+
+type ValidatedPlcOp = {
+  type: 'plc_operation'
+  rotationKeys: string[]
+  verificationMethods: Record<string, string>
+  alsoKnownAs: string[]
+  services: Record<string, { type: string; endpoint: string }>
+  prev: string
+  sig: string
+}
+
+function validatePlcOp(
+  raw: unknown,
+  expect: {
+    handle: string
+    expectedSigningDidKey: string
+    expectedServiceEndpoint: string
+  },
+): ValidatedPlcOp {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw BadRequest('plcOp is required and must be an object', 'InvalidRequest')
+  }
+  const op = raw as Record<string, unknown>
+
+  if (op.type !== 'plc_operation') {
+    throw BadRequest(
+      "plcOp.type must be 'plc_operation'",
+      'IncompatibleDidDoc',
+    )
+  }
+
+  if (typeof op.sig !== 'string' || op.sig.length === 0) {
+    throw BadRequest('plcOp.sig is required', 'IncompatibleDidDoc')
+  }
+
+  // Rotate ops chain; `prev` must reference the previous op's CID. The
+  // genesis branch has `prev: null`, but a migrating-in op is by definition
+  // a rotation.
+  if (typeof op.prev !== 'string' || op.prev.length === 0) {
+    throw BadRequest(
+      'plcOp.prev must be the previous op CID (migrations are rotate ops)',
+      'IncompatibleDidDoc',
+    )
+  }
+
+  const rotationKeys = op.rotationKeys
+  if (
+    !Array.isArray(rotationKeys) ||
+    rotationKeys.length === 0 ||
+    !rotationKeys.every((k) => typeof k === 'string')
+  ) {
+    throw BadRequest(
+      'plcOp.rotationKeys must be a non-empty string array',
+      'IncompatibleDidDoc',
+    )
+  }
+
+  const verificationMethods = op.verificationMethods
+  if (
+    !verificationMethods ||
+    typeof verificationMethods !== 'object' ||
+    Array.isArray(verificationMethods)
+  ) {
+    throw BadRequest(
+      'plcOp.verificationMethods must be an object',
+      'IncompatibleDidDoc',
+    )
+  }
+  const vmAtproto = (verificationMethods as Record<string, unknown>).atproto
+  if (typeof vmAtproto !== 'string') {
+    throw BadRequest(
+      'plcOp.verificationMethods.atproto is required',
+      'IncompatibleDidDoc',
+    )
+  }
+  if (vmAtproto !== expect.expectedSigningDidKey) {
+    throw BadRequest(
+      `plcOp.verificationMethods.atproto must equal the reserved signing key (${expect.expectedSigningDidKey})`,
+      'MismatchedSigningKey',
+    )
+  }
+
+  const services = op.services
+  if (!services || typeof services !== 'object' || Array.isArray(services)) {
+    throw BadRequest('plcOp.services must be an object', 'IncompatibleDidDoc')
+  }
+  const pdsService = (services as Record<string, unknown>).atproto_pds
+  if (!pdsService || typeof pdsService !== 'object' || Array.isArray(pdsService)) {
+    throw BadRequest(
+      'plcOp.services.atproto_pds must be an object',
+      'IncompatibleDidDoc',
+    )
+  }
+  const svc = pdsService as Record<string, unknown>
+  if (svc.type !== 'AtprotoPersonalDataServer') {
+    throw BadRequest(
+      "plcOp.services.atproto_pds.type must be 'AtprotoPersonalDataServer'",
+      'IncompatibleDidDoc',
+    )
+  }
+  if (typeof svc.endpoint !== 'string') {
+    throw BadRequest(
+      'plcOp.services.atproto_pds.endpoint must be a string',
+      'IncompatibleDidDoc',
+    )
+  }
+  if (svc.endpoint.replace(/\/$/, '') !== expect.expectedServiceEndpoint) {
+    throw BadRequest(
+      `plcOp.services.atproto_pds.endpoint must equal ${expect.expectedServiceEndpoint}`,
+      'MismatchedServiceEndpoint',
+    )
+  }
+
+  const alsoKnownAs = op.alsoKnownAs
+  if (
+    !Array.isArray(alsoKnownAs) ||
+    alsoKnownAs.length === 0 ||
+    !alsoKnownAs.every((a) => typeof a === 'string')
+  ) {
+    throw BadRequest(
+      'plcOp.alsoKnownAs must be a non-empty string array',
+      'IncompatibleDidDoc',
+    )
+  }
+  if (alsoKnownAs[0] !== `at://${expect.handle}`) {
+    throw BadRequest(
+      `plcOp.alsoKnownAs[0] must be at://${expect.handle}`,
+      'IncompatibleDidDoc',
+    )
+  }
+
+  return {
+    type: 'plc_operation',
+    rotationKeys: rotationKeys as string[],
+    verificationMethods: verificationMethods as Record<string, string>,
+    alsoKnownAs: alsoKnownAs as string[],
+    services: services as Record<string, { type: string; endpoint: string }>,
+    prev: op.prev,
+    sig: op.sig,
   }
 }
 

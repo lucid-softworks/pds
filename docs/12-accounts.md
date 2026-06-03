@@ -191,6 +191,20 @@ did:plc:g7k4q6y6jmrr3hgpwxs4f5n2
 > and pointing at plc.directory, or (b) running your own PLC mirror. See
 > chapter 18 — Production.
 
+> 📖 **Migrating accounts.** The flow above generates the keys, signs the
+> genesis op, and derives a fresh DID. The other entry point — a user
+> moving from another PDS — *brings their existing DID*. They pre-reserve
+> a signing key on this PDS, build and sign a PLC *rotate* op (still
+> signed with their long-lived rotation key, not anything we hold) that
+> points `verificationMethods.atproto` at our reserved key and the
+> `atproto_pds` service at our `publicUrl`, then hand both to
+> `createAccount` as `did` + `plcOp`. We adopt the DID, persist the op as
+> the local genesis (seq 0 — the upstream chain stays on the old PDS in
+> local-PLC mode), consume the reservation, and park the account in
+> `deactivated` state. The repo lands later through `importRepo`, which
+> activates the account once the imported commit verifies. See chapter
+> 20 — Migration.
+
 ## Step 5 — Hash the password
 
 `src/pds/auth/password.ts` runs **scrypt** via `node:crypto`. Parameters:
