@@ -329,7 +329,8 @@ GET, requires the caller's access token. Query parameters:
 
 Output: `{ token: "<jwt>" }`.
 
-We sign with HS256 using the shared `PDS_JWT_SECRET`. The claims:
+We sign ES256K with the account's k256 repo signing key — the same key
+listed as `#atproto` in the user's DID document. The claims:
 
 ```
 iss = <user DID>
@@ -340,14 +341,14 @@ exp = <now + ttl>
 jti = <random base64url>
 ```
 
-> ⚠️ **Spec divergence.** Real atproto service tokens are signed with
-> ES256K using the user's own signing key; the receiver verifies against
-> the user's DID document. Our HS256 tokens only verify against the
-> shared PDS secret, which is fine for self-issued tokens this same PDS
-> consumes but **does not federate**. The shape (iss/aud/lxm/exp) is
-> identical; swap the signer to `signBytes(account.signingKeyPriv, ...)`
-> + the matching verify step in `auth/middleware.ts` to make this work
-> across PDSes.
+The receiver (bsky.app, the Relay, the destination PDS) verifies the
+signature against the `verificationMethod[#atproto]` entry in the
+issuer's DID document. No shared secret crosses the wire; the token is
+content-addressed by the same key that signs the user's repo, so a
+counterfeit would have to compromise the signing key itself. The signer
+lives in `src/pds/auth/service_auth.ts` and is reused by
+`requestAccountMigrate` to mint the longer-lived (one-hour) token the
+destination PDS presents to the source.
 
 ### `com.atproto.server.reserveSigningKey`
 
@@ -552,19 +553,7 @@ real directory; chapter 18 covers the env switch. The local-only PLC
 was always a dev shortcut; migration is the workload that exposes its
 limit.
 
-### 2. Service tokens use HS256 instead of ES256K
-
-Both `getServiceAuth` (60-second tokens) and `requestAccountMigrate`
-(one-hour tokens) sign with HS256 against the shared `PDS_JWT_SECRET`.
-The shape (iss/aud/lxm/exp) is correct; the algorithm isn't. The
-receiver of an HS256 token has to share the secret with the issuer,
-which works when source and destination are the same PDS (useful for
-testing) and breaks across the network. The fix is one helper that
-signs with the user's k256 signing key, plus a matching verifier in
-the middleware that resolves the issuer's DID document and verifies
-against the listed `verificationMethod[#atproto]`.
-
-### 3. No `accountMigrated` cleanup on the source
+### 2. No `accountMigrated` cleanup on the source
 
 After `requestAccountMigrate` runs, `migration_state` stays
 `'migrating-out'` forever — there's no callback from the destination
@@ -575,7 +564,7 @@ final `#tombstone` so firehose consumers can drop the DID from their
 indexes. We don't ship it here; the moderation-adjacent chapter that
 owns operator-driven account lifecycle is the natural home.
 
-### 4. `signPlcOperation` doesn't refuse self-eviction
+### 3. `signPlcOperation` doesn't refuse self-eviction
 
 The handler logs a warning but accepts an op that drops this PDS's
 rotation key out of `rotationKeys`. The reference Bluesky PDS refuses
