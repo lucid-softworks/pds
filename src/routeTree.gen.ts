@@ -28,6 +28,7 @@ import { Route as AdminSignupsRouteImport } from './routes/admin/signups'
 import { Route as AdminLogoutRouteImport } from './routes/admin/logout'
 import { Route as AdminLoginRouteImport } from './routes/admin/login'
 import { Route as AdminInvitesRouteImport } from './routes/admin/invites'
+import { Route as Char91DotwellKnownChar93FileRouteImport } from './routes/[.well-known]/$file'
 
 const MetricsRoute = MetricsRouteImport.update({
   id: '/metrics',
@@ -124,11 +125,18 @@ const AdminInvitesRoute = AdminInvitesRouteImport.update({
   path: '/admin/invites',
   getParentRoute: () => rootRouteImport,
 } as any)
+const Char91DotwellKnownChar93FileRoute =
+  Char91DotwellKnownChar93FileRouteImport.update({
+    id: '/.well-known/$file',
+    path: '/.well-known/$file',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteRouteWithChildren
   '/metrics': typeof MetricsRoute
+  '/.well-known/$file': typeof Char91DotwellKnownChar93FileRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/logout': typeof AdminLogoutRoute
@@ -149,6 +157,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/metrics': typeof MetricsRoute
+  '/.well-known/$file': typeof Char91DotwellKnownChar93FileRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/logout': typeof AdminLogoutRoute
@@ -171,6 +180,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/app': typeof AppRouteRouteWithChildren
   '/metrics': typeof MetricsRoute
+  '/.well-known/$file': typeof Char91DotwellKnownChar93FileRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/logout': typeof AdminLogoutRoute
@@ -194,6 +204,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/metrics'
+    | '/.well-known/$file'
     | '/admin/invites'
     | '/admin/login'
     | '/admin/logout'
@@ -214,6 +225,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/metrics'
+    | '/.well-known/$file'
     | '/admin/invites'
     | '/admin/login'
     | '/admin/logout'
@@ -235,6 +247,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/metrics'
+    | '/.well-known/$file'
     | '/admin/invites'
     | '/admin/login'
     | '/admin/logout'
@@ -257,6 +270,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRouteRoute: typeof AppRouteRouteWithChildren
   MetricsRoute: typeof MetricsRoute
+  Char91DotwellKnownChar93FileRoute: typeof Char91DotwellKnownChar93FileRoute
   AdminInvitesRoute: typeof AdminInvitesRoute
   AdminLoginRoute: typeof AdminLoginRoute
   AdminLogoutRoute: typeof AdminLogoutRoute
@@ -407,6 +421,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminInvitesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/.well-known/$file': {
+      id: '/.well-known/$file'
+      path: '/.well-known/$file'
+      fullPath: '/.well-known/$file'
+      preLoaderRoute: typeof Char91DotwellKnownChar93FileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -430,6 +451,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRouteRoute: AppRouteRouteWithChildren,
   MetricsRoute: MetricsRoute,
+  Char91DotwellKnownChar93FileRoute: Char91DotwellKnownChar93FileRoute,
   AdminInvitesRoute: AdminInvitesRoute,
   AdminLoginRoute: AdminLoginRoute,
   AdminLogoutRoute: AdminLogoutRoute,
