@@ -20,7 +20,9 @@
     "admin:hash": "tsx scripts/admin-hash.ts",
     "pds-admin": "tsx scripts/pds-admin.ts",
     "pds:export": "tsx scripts/pds-export.ts",
-    "pds:import": "tsx scripts/pds-import.ts"
+    "pds:import": "tsx scripts/pds-import.ts",
+    "bench": "tsx scripts/pds-bench.ts",
+    "stress": "tsx scripts/pds-stress.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.14",

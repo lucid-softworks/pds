@@ -11,13 +11,16 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       # Required by src/lib/config.ts at module-load time. CI uses fixed values
-      # so the config validator is happy without exposing real secrets.
+      # so the config validator is happy without exposing real secrets. Same
+      # convention as vitest.setup.ts — 64 zero hex chars for the symmetric
+      # secrets, 64 zero hex chars (32 bytes) for the OAuth signing scalar.
       PDS_PUBLIC_URL: http://localhost:3000
       PDS_HOSTNAME: localhost
       PDS_JWT_SECRET: 0000000000000000000000000000000000000000000000000000000000000000
+      PDS_OAUTH_SIGNING_KEY: 0000000000000000000000000000000000000000000000000000000000000000
       DATABASE_URL: pglite
 
     steps:
@@ -38,12 +41,8 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Build
-        run: pnpm vite build
-
       - name: Test
         run: pnpm test
-        # If the vitest harness hasn't landed yet, don't fail CI for that —
-        # the test script may simply be a no-op. Once tests are in, drop the
-        # continue-on-error.
-        continue-on-error: true
+
+      - name: Build
+        run: pnpm vite build

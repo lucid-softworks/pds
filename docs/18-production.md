@@ -255,6 +255,53 @@ unless you're debugging — it might contain blob bytes.
 - firehose lag > 10 seconds (means consumers are getting stale data)
 - backup failure
 
+## Benchmarking + load testing
+
+Two scripts ship for sanity-checking performance, both running against the
+same orchestrators the XRPC handlers wrap — no HTTP, no JSON parsing, no
+auth middleware. They measure the work itself, not the dispatcher.
+
+**`pnpm bench`** is a microbenchmark over four hot paths: `createAccount`,
+`applyWrites` (single record), `listRecords` (one 50-row page), and
+`getRepo` (full CAR export). Each runs N times (default 100) and the
+script prints median, p99, min, and max in milliseconds. Use it
+**before/after a perf-sensitive PR** — if you touched the MST, the commit
+signer, or the records index, run it locally on `main` first, then on
+your branch, and compare. Roll a fresh baseline at every release tag so
+regressions are visible against a stable reference rather than against
+whatever was on `main` last week.
+
+**`pnpm stress`** drives N accounts × M posts (defaults: 100 × 10)
+sequentially through `createAccount` + `applyWrites`. It prints total
+elapsed, account- and post-creates per second, and the on-disk DB size
+(via `pg_database_size(current_database())`, falling back to a recursive
+directory stat). Use it for **capacity planning**: it surfaces
+sequence-table back-pressure, MST node bloat, blockstore write
+amplification, and — once you point it at a real Postgres via
+`DATABASE_URL` — connection pool starvation and the difference between
+the in-process driver path and one that goes over a socket.
+
+What neither tells you: anything about a real deployment. Production
+adds network round-trips between the client and the PDS, real disk
+latency (the bench's tmpfs is unrepresentative), real concurrency
+(neither script forks; the PDS itself serialises writes per repo today),
+real auth contention (every request goes through password verify on the
+first hit, JWT verify thereafter), and real plc.directory latency
+(both scripts force `PDS_LOCAL_PLC=true`).
+
+Both default to PGlite. For numbers that reflect what your operator
+hardware will do, set `DATABASE_URL` to a hosted Postgres and re-run:
+
+```bash
+DATABASE_URL=postgres://... pnpm bench --iterations 200
+DATABASE_URL=postgres://... pnpm stress --accounts 1000 --posts-per-account 50
+```
+
+If the hosted Postgres run is *slower* than PGlite for tiny benches,
+that's expected — the network round-trip per query swamps the work. The
+gap inverts at scale, where Postgres's buffer cache and parallelism
+matter and PGlite's single-threaded WASM ceiling is the bottleneck.
+
 ## Email
 
 `createAccount` currently doesn't send a verification email. Production
