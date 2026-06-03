@@ -38,6 +38,9 @@
 #  10. systemd unit for the PDS, listening on 127.0.0.1:3000
 #  11. Caddyfile that fronts $DOMAIN with HTTP-01 TLS
 #  12. ufw allowing 22, 80, 443
+#  13. requestCrawl against the configured Relay so bsky.network starts
+#      subscribing to our firehose (without this, posts persist locally
+#      but never show up in bsky.app timelines)
 #
 # Anything secret (Postgres password, JWT secret, repo signing key, OAuth
 # signing key, admin password) is generated *on the box* and only written
@@ -54,7 +57,7 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-: "${DOMAIN:?DOMAIN env var is required (e.g. DOMAIN=wickwork.cafe)}"
+: "${DOMAIN:?DOMAIN env var is required (e.g. DOMAIN=pds.example.com)}"
 : "${ADMIN_EMAIL:?ADMIN_EMAIL env var is required (used for Lets Encrypt)}"
 ADMIN_HANDLE="${ADMIN_HANDLE:-luna.${DOMAIN}}"
 PDS_REPO="${PDS_REPO:-https://github.com/lucid-softworks/pds.git}"
@@ -285,6 +288,23 @@ systemctl restart caddy
 ufw allow OpenSSH >/dev/null
 ufw allow 80,443/tcp >/dev/null
 ufw --force enable >/dev/null
+
+# Relay registration. Tell bsky.network (the canonical Bluesky Relay) to
+# subscribe to our firehose. Without this, posts users make on this PDS
+# never appear in bsky.app timelines because no AppView has indexed
+# them. Idempotent: re-runs are no-ops. Honors PDS_RELAY for operators
+# who want to register elsewhere.
+RELAY="${PDS_RELAY:-https://bsky.network}"
+log "    requestCrawl → ${RELAY}"
+if ! curl --fail --silent --show-error --max-time 15 \
+  -X POST "${RELAY}/xrpc/com.atproto.sync.requestCrawl" \
+  -H 'content-type: application/json' \
+  -d "{\"hostname\":\"${DOMAIN}\"}" >/dev/null; then
+  warn "requestCrawl to ${RELAY} failed — re-run later with:"
+  warn "  curl -X POST ${RELAY}/xrpc/com.atproto.sync.requestCrawl \\"
+  warn "    -H 'content-type: application/json' \\"
+  warn "    -d '{\"hostname\":\"${DOMAIN}\"}'"
+fi
 
 echo
 echo "============================================================"

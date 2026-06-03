@@ -661,6 +661,16 @@ firehose drops to other processes on disconnect).
 - [ ] S3 lifecycle + replication configured
 - [ ] Logs + metrics + alerts flowing
 - [ ] An email-verification flow exists (even if minimal)
+- [ ] **Relay registration** — `curl -X POST
+      https://bsky.network/xrpc/com.atproto.sync.requestCrawl
+      -H 'content-type: application/json'
+      -d '{"hostname":"<your-pds-host>"}'` returns 200. Without this,
+      `bsky.network` won't subscribe to your firehose and posts your
+      users make won't ever appear in `bsky.app`'s timeline — even
+      though they're persisted in your repos and federated correctly
+      otherwise. `scripts/deploy.sh` runs this for you on first deploy;
+      re-running is idempotent. Chapter 17 explains the role of the
+      Relay in detail.
 
 When that's all green, register your first account, sign in from a
 Bluesky-compatible client, and watch the bytes flow.

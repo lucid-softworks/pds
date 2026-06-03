@@ -344,10 +344,18 @@ Two endpoints drive the flow:
   and sets `accounts.email_confirmed_at = now()`. Returns `InvalidToken`
   (401) on miss or expiry.
 
-Tokens are 160 bits from `randomBytes(20)` rendered as RFC 4648 base32 (no
-padding). That's short enough to read aloud from an email, long enough
-that guessing is infeasible. Issuing a fresh token wipes any prior live
-token for the same (did, purpose) — only the newest is valid.
+Tokens are shaped `XXXXX-XXXXX` — two groups of five base32 characters
+separated by a hyphen, ~50 bits of entropy (8 random bytes → 13 base32
+chars, sliced to 10). That's short enough to retype from an email or
+read aloud, long enough that guessing is infeasible against any
+operator-imposed rate limit. Issuing a fresh token wipes any prior live
+token for the same `(did, purpose)` — only the newest is valid.
+
+The displayed form is **uppercase** (bsky.app's reset/confirm UIs auto-
+uppercase the input field), but the row stores the lowercase canonical
+form and the lookup normalises with `token.trim().toLowerCase()` — so a
+user pasting `JMSZ2-TDMA4`, `jmsz2-tdma4`, or ` jmsz2-tdma4 ` all match
+the same row.
 
 The full set of `EmailPurpose` values today is:
 
@@ -449,15 +457,22 @@ startup. Two backends ship:
 
   ```json
   // generic
-  { "from": "...", "to": "...", "subject": "...", "text": "...", "replyTo": "..." }
+  { "from": "...", "to": "...", "subject": "...", "text": "...", "html": "...", "replyTo": "..." }
 
   // postmark
-  { "From": "...", "To": "...", "Subject": "...", "TextBody": "...", "ReplyTo": "..." }
+  { "From": "...", "To": "...", "Subject": "...", "TextBody": "...", "HtmlBody": "...", "ReplyTo": "..." }
   ```
 
   The request includes `Authorization: Bearer <token>` and a 10-second
   abort timeout. On 4xx/5xx or a network error the backend logs at error
   level and throws.
+
+  Each call site sends both `text` (the plain-text canonical body) AND
+  `html` — the latter is rendered by `renderTransactionalEmailHtml()`
+  in the same module: an inline-CSS card with the PDS hostname in the
+  header strip, the token in a monospace block, and a footer. Mail
+  clients pick whichever they can render; the text version is always
+  the fallback.
 
 Operator wires the backend through these env vars:
 

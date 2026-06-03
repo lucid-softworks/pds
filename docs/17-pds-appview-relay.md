@@ -111,12 +111,29 @@ Three things can introduce a new PDS to the network:
   allow-list — the relay decides which submissions to honor by its own
   spam policy.
 
-Our PDS does *not* currently call `requestCrawl` on anyone, because the
-firehose endpoint ships in a later chapter. When it does, the call is a
-single POST: `{ hostname }`, sent to whatever relay this operator has
-chosen to register with. Until then, our PDS is a happily reachable
-island. A relay that learned about us via a DID resolution would still
-be able to backfill via the sync endpoints we've built.
+For a relay to actually start subscribing, the PDS asks it to. The
+canonical knob is `com.atproto.sync.requestCrawl` — a single
+unauthenticated POST with `{ hostname }`. The relay responds 200 (no
+body), opens our firehose, and if it's the first time, runs the
+backfill above. There's no allow-list; the relay decides which
+submissions to honor by its own spam policy.
+
+```sh
+# Tell Bluesky's reference relay to start crawling our firehose.
+curl -X POST 'https://bsky.network/xrpc/com.atproto.sync.requestCrawl' \
+  -H 'content-type: application/json' \
+  -d '{"hostname":"pds.example.com"}'
+```
+
+[`scripts/deploy.sh`](../scripts/deploy.sh) runs this on first
+provision so a freshly-deployed PDS is reachable by `bsky.app` clients
+out of the box — without it, your posts persist locally but never
+appear in anyone's timeline because no AppView has indexed them. The
+call is idempotent: re-runs are no-ops.
+
+Other relays (a federated alternative, a private one inside a single
+organization) take the same call. The hostname field lets one PDS
+register itself with multiple relays from the same script.
 
 The DID we serve at `/.well-known/did.json` is the service identity:
 
@@ -212,12 +229,12 @@ So when bsky.app on `https://bsky.app` wants
 
 ```http
 GET /xrpc/app.bsky.actor.getProfile?actor=did:plc:abc HTTP/1.1
-Host: wickwork.cafe
+Host: pds.example.com
 Authorization: Bearer <pds-access-jwt>
 Atproto-Proxy: did:web:api.bsky.app#bsky_appview
 ```
 
-…to **the user's PDS** (`wickwork.cafe`). The `Atproto-Proxy` header
+…to **the user's PDS** (`pds.example.com`). The `Atproto-Proxy` header
 tells the PDS: *forward this to the service identified by
 `did:web:api.bsky.app`'s `#bsky_appview` entry, on my behalf.* The PDS
 responds with whatever the AppView responded with.
@@ -302,7 +319,7 @@ with the header and rejects (404 `XrpcProxyTargetNotFound`) when the
 target DID has no matching service.
 
 Result: bsky.app at `https://bsky.app`, an alternate client, your
-own React Native app — all of them treat your PDS at `wickwork.cafe`
+own React Native app — all of them treat your PDS at `pds.example.com`
 as the single entry point. Profile lookups, timeline fetches,
 notifications, DMs, moderation reports — every one of them tunnels
 through your PDS to the AppView/chat/Ozone service that knows the

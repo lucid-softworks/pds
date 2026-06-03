@@ -297,9 +297,15 @@ the genesis op did, just chained one step further down the log:
 1. **Authenticate.** `requireAccessAuth` resolves the bearer JWT to the
    account row.
 2. **Validate.** The new handle goes through `assertValidHandle`; reserved
-   TLDs warn but pass (mirroring create). If the requested handle equals the
-   current one we return 200 immediately — no-op rotations don't pollute
-   the log.
+   TLDs warn but pass (mirroring create). If the requested handle equals
+   the current one we skip the PLC rotation (nothing to change) but
+   **still emit an `#identity` firehose event**. That's a documented
+   nudge: when bsky.app's AppView shows `⚠ Invalid handle` because its
+   identity cache holds a stale verification failure (e.g. you
+   published `_atproto.<handle>` TXT or `/.well-known/atproto-did` after
+   the AppView first looked), calling `updateHandle` with the current
+   handle forces every subscribing AppView to re-resolve. No PLC churn,
+   just a fresh hint on the firehose.
 3. **Check availability.** `resolveLocalHandle(newHandle)` — if it resolves
    to a different DID, return `HandleNotAvailable` (HTTP 409).
 4. **Rotate the PLC log.** `rotatePlc({ did, newHandle, rotationKeyPriv })`
@@ -360,18 +366,19 @@ it returns `InvalidInviteCode` (HTTP 401) and never touches the database.
 
 ### Code shape
 
-Codes look like `pds-x2k4g-9p3qm`: a literal `pds-` prefix, then two
-five-character groups of lowercase base32, separated by a hyphen. The ten
-data characters carry ~50 bits of entropy, drawn from
-`crypto.randomBytes(8)` and base32-encoded via the same
-`multiformats/bases/base32` package the PLC module uses. At ~10¹⁵ possible
-codes, brute-forcing one isn't tractable against the rate limits any sane
-operator will apply.
+Codes look like `pds-example-com-x2k4g-9p3qm`: the PDS hostname (with
+`.` rewritten as `-`), then two five-character groups of lowercase
+base32, separated by hyphens. The ten data characters carry ~50 bits of
+entropy, drawn from `crypto.randomBytes(8)` and base32-encoded via the
+same `multiformats/bases/base32` package the PLC module uses. At ~10¹⁵
+possible codes, brute-forcing one isn't tractable against the rate
+limits any sane operator will apply.
 
-The format isn't load-bearing — it's just a short, human-typable string.
-The database has no opinion on its shape beyond uniqueness; if a future
-chapter wants to add per-PDS branding (`mypds-...`) the schema doesn't need
-to change.
+The hostname prefix matches the official Bluesky PDS convention and lets
+bsky.app's signup form accept the value via its `^[a-z0-9-]+$` field
+regex. A hardcoded `pds-` prefix breaks the regex on multi-label hosts
+(e.g. `pds.example.com` would have produced a code with an extra dot)
+and loses the "which PDS minted this" signal the prefix carries.
 
 ### Two ways to mint
 
@@ -441,7 +448,7 @@ curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createInviteCode \
   -H "authorization: Basic $ADMIN_AUTH" \
   -H 'content-type: application/json' \
   -d '{"useCount": 1}'
-# → {"code":"pds-x2k4g-9p3qm"}
+# → {"code":"pds-example-com-x2k4g-9p3qm"}
 ```
 
 Sign up with that code:
@@ -453,7 +460,7 @@ curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createAccount \
     "handle": "alice.test",
     "email": "alice@example.com",
     "password": "correcthorsebatterystaple",
-    "inviteCode": "pds-x2k4g-9p3qm"
+    "inviteCode": "pds-example-com-x2k4g-9p3qm"
   }'
 # → 200, full account payload
 ```
@@ -467,7 +474,7 @@ curl -s -X POST http://localhost:3000/xrpc/com.atproto.server.createAccount \
     "handle": "bob.test",
     "email": "bob@example.com",
     "password": "correcthorsebatterystaple",
-    "inviteCode": "pds-x2k4g-9p3qm"
+    "inviteCode": "pds-example-com-x2k4g-9p3qm"
   }'
 # → {"error":"InvalidInviteCode","message":"invite code exhausted"}
 ```
@@ -478,12 +485,12 @@ open signup; the code field is ignored when present.
 
 ## Handle verification (the other half of identity)
 
-The account row stores a `handle` (e.g. `luna.wickwork.cafe`) alongside
+The account row stores a `handle` (e.g. `alice.pds.example.com`) alongside
 the `did` (e.g. `did:plc:23leyc5tov4y4oxzei5ttv5d`). The DID is the
 durable, machine-readable identifier; the handle is the
 human-readable face. AppViews + relays need to verify that the
-handle's claim ("I'm `luna.wickwork.cafe`") and the DID document's
-claim (`alsoKnownAs: ["at://luna.wickwork.cafe"]`) agree — without
+handle's claim ("I'm `alice.pds.example.com`") and the DID document's
+claim (`alsoKnownAs: ["at://alice.pds.example.com"]`) agree — without
 that bidirectional check, the AppView shows `handle.invalid` on every
 post.
 
@@ -507,7 +514,7 @@ moderation action to keep advertising the handle binding.
 For the route to actually answer, two pieces have to be in place:
 
 - **DNS**: a wildcard or per-handle A record so the handle resolves
-  to the PDS box. `*.wickwork.cafe → <VPS-IP>` (DNS-only at
+  to the PDS box. `*.pds.example.com → <VPS-IP>` (DNS-only at
   Cloudflare; no proxying) is the one-line setup. Without this, the
   AppView's request never reaches the PDS at all.
 - **TLS**: a cert that covers the handle. Caddy's per-handle
@@ -517,7 +524,7 @@ For the route to actually answer, two pieces have to be in place:
   once, but that needs a DNS-API plugin (chapter 18 deploy script
   uses HTTP-01 for the apex and adds handles on demand).
 
-The apex (`wickwork.cafe` itself) is intentionally rejected — it's
+The apex (`pds.example.com` itself) is intentionally rejected — it's
 the PDS, not a user. Hosting a user at the apex would shadow
 `/.well-known/did.json`, the PDS's own DID document.
 
