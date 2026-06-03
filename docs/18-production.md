@@ -233,27 +233,122 @@ the cheapest insurance you'll buy this year.
 
 ## Observability
 
-Three categories worth instrumenting:
+Three pieces ship in-process: a structured logger, an in-memory metrics
+registry with a Prometheus `/metrics` endpoint, and a SIGTERM-driven
+graceful-shutdown coordinator. None of them brings a new dependency —
+stdout, stderr, and Node's signal handlers are the runtime primitives.
 
-**Logs**: structured JSON, one line per request, including the NSID, the
-account DID, the response status, the duration. Skip the request body
-unless you're debugging — it might contain blob bytes.
+### Logger (`src/lib/logger.ts`)
 
-**Metrics**: at minimum,
+One JSON object per line. The shape is
 
-- request count + duration histogram, labeled by NSID and status code
-- DB pool wait time
-- blob upload bytes
-- firehose connection count
-- `repo_seq` lag (now() − latest sequencedAt) — should always be sub-second
+```json
+{"time":"2026-06-01T15:42:11.103Z","level":"info","component":"xrpc",
+ "nsid":"com.atproto.repo.createRecord","method":"POST","status":200,
+ "durationMs":42.7,"msg":"xrpc-request"}
+```
 
-**Alerts**: page on
+Levels are hierarchical (`trace < debug < info < warn < error < fatal`).
+The minimum level is controlled by `PDS_LOG_LEVEL` (default `info`).
+`warn` and above go to stderr; `info` and below go to stdout — so a log
+shipper that splits streams (k8s log driver, journald, systemd) can
+pre-filter without re-parsing.
+
+If a log field's value is an `Error`, the logger hoists it onto `err`
+with `name`, `message`, and `stack`. That keeps stack traces greppable
+without flooding every line with stringified errors.
+
+For local development, pretty mode (`PDS_LOG_PRETTY=true`, default-on
+when `NODE_ENV !== 'production'`) swaps the JSON for a coloured single
+line. In prod the env var is off and you get raw JSON — what every log
+aggregator expects.
+
+Child loggers carry parent fields. The dispatcher does
+
+```ts
+const reqLog = getLogger('xrpc').with({ nsid, method, did })
+reqLog.info('xrpc-request', { status, durationMs })
+```
+
+so the call site stays a single line and downstream code never has to
+re-thread context.
+
+> No log-file rotation: stdout is the only sink. Whatever runs the
+> process — `logrotate`, journald, the k8s log driver, ECS, your
+> systemd unit — is responsible for retention.
+
+### Metrics (`src/lib/metrics.ts` and `GET /metrics`)
+
+In-process counters and histograms. Five collectors are pre-defined and
+imported by the rest of the code:
+
+| Metric | Type | Labels | Where it ticks |
+| --- | --- | --- | --- |
+| `pds_xrpc_requests_total` | counter | `nsid`, `method`, `status` | XRPC dispatcher (every response) |
+| `pds_xrpc_request_duration_seconds` | histogram | `nsid`, `method` | XRPC dispatcher (every response) |
+| `pds_firehose_events_total` | counter | `event_type` (commit / identity / account / tombstone) | `sequence.ts` after each successful write |
+| `pds_blob_upload_bytes_total` | counter | — | `uploadBlob` (bytes accepted, including dedup hits) |
+| `pds_blobs_total` | counter | — | `uploadBlob` (only on fresh insert; monotonic — GC sweeps are *not* decremented, query the `blobs` table for the true count) |
+
+Custom metrics are a one-liner: `counter('my_metric', 'help', ['a','b'])`
+or `histogram('my_metric', 'help', ['k'], DEFAULT_HTTP_BUCKETS)`. Both
+auto-register so `renderProm()` picks them up.
+
+The `/metrics` endpoint serves the Prometheus text exposition
+(`Content-Type: text/plain; version=0.0.4`). It's off by default — scrape
+endpoints can leak request volumes and label cardinalities to anyone who
+can reach them, so opt in deliberately:
+
+```bash
+PDS_METRICS=true pnpm start
+```
+
+When disabled, GET /metrics returns 404 (not 403 — we don't want to
+confirm the endpoint exists). When enabled, **wrap it behind a reverse
+proxy ACL**: allow only your scraper's IP, or require a Bearer token at
+the proxy layer. The teaching port intentionally omits in-process auth
+because every realistic deployment fronts the PDS with Caddy / nginx /
+an LB anyway and that's the right authority for scrape ACLs.
+
+### Graceful shutdown (`src/lib/shutdown.ts`)
+
+Subsystems register teardowns with `onShutdown(name, fn)`. On SIGTERM /
+SIGINT the coordinator runs them in parallel, each in its own
+`try/catch`, then calls `process.exit(0)`. Today's registrations:
+
+- **firehose-ws**: close every live `subscribeRepos` WebSocket with code
+  1001 (going away), then shut the listener.
+- **db**: flush the postgres-js pool (or `client.close()` for pglite).
+
+In **production** (`pnpm start`), the Node entry point owns the signals
+and the coordinator runs normally — a rolling deploy can drain a
+process before terminating it.
+
+In **dev** (`pnpm dev`), Vite's own dev server owns SIGINT and tears
+down its module graph synchronously, which short-circuits our handler.
+That's by design: Vite needs to release its watchers, reload state, and
+hand control back to the shell quickly enough for a developer's Ctrl-C
+to feel snappy. Don't try to fix it — the production path is what
+matters for graceful drain.
+
+### Alerts to set
+
+Page on:
 
 - 5xx rate > 1% for 5 minutes
+  (`sum(rate(pds_xrpc_requests_total{status=~"5.."}[5m])) /
+   sum(rate(pds_xrpc_requests_total[5m]))`)
+- p99 request duration above the bucket cap (10s) for 5 minutes
 - DB pool saturation > 80% for 5 minutes
 - disk space < 20%
 - firehose lag > 10 seconds (means consumers are getting stale data)
 - backup failure
+
+### Not yet wired
+
+- **OpenTelemetry tracing.** The natural next step is span propagation
+  through the dispatcher → orchestrator → DB call chain. Out of scope
+  here; the chapter on distributed systems will pick it up.
 
 ## Benchmarking + load testing
 

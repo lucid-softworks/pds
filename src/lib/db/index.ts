@@ -18,6 +18,10 @@ type Db =
   | ReturnType<typeof drizzlePostgres<typeof schema>>
 
 let _db: Db | null = null
+// Hold the underlying driver handle so the graceful-shutdown path can flush
+// and close it. We don't expose this to callers — they use `db` — but the
+// shutdown coordinator pulls it out via `closeDb()` below.
+let _closer: (() => Promise<void>) | null = null
 
 export function getDb(): Db {
   if (_db) return _db
@@ -29,11 +33,27 @@ export function getDb(): Db {
         : path.join(process.cwd(), '.pglite')
     const client = new PGlite(dir)
     _db = drizzlePglite(client, { schema })
+    _closer = async () => {
+      await client.close()
+    }
     return _db
   }
   const sql = postgres(url, { max: 10, prepare: false })
   _db = drizzlePostgres(sql, { schema })
+  _closer = async () => {
+    await sql.end({ timeout: 5 })
+  }
   return _db
+}
+
+/** Flush and close the active DB driver. Idempotent. Used by the graceful
+ *  shutdown coordinator (`~/lib/shutdown`). */
+export async function closeDb(): Promise<void> {
+  const closer = _closer
+  if (!closer) return
+  _closer = null
+  _db = null
+  await closer()
 }
 
 // Convenience: most call sites don't need to think about the factory.

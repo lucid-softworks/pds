@@ -16,6 +16,12 @@ import { join } from 'node:path'
 
 process.env.PDS_PUBLIC_URL ??= 'http://localhost:3000'
 process.env.PDS_HOSTNAME ??= 'localhost'
+// Quiet the structured logger in tests. The dispatcher emits an info line
+// per request and the test suite makes hundreds; without this the test
+// output is dominated by request logs. Tests that exercise the logger
+// itself override this via `resetLoggerCacheForTests()` after a level swap.
+process.env.PDS_LOG_LEVEL ??= 'fatal'
+process.env.PDS_LOG_PRETTY ??= 'false'
 // 64 zero hex chars = 32 bytes — the minimum the config validator accepts.
 process.env.PDS_JWT_SECRET ??=
   '0'.repeat(64)

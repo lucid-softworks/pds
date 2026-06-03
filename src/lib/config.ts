@@ -6,6 +6,8 @@
 
 import { hexToBytes } from '@noble/hashes/utils'
 
+import type { LogLevel } from './logger'
+
 export type PdsConfig = {
   publicUrl: string // e.g. https://pds.example.com
   hostname: string // e.g. pds.example.com
@@ -30,6 +32,13 @@ export type PdsConfig = {
    *  PDS-as-repo-host signs commits with the account's own key. NULL when
    *  the OAuth surface is disabled. See chapter 21 — OAuth. */
   oauthSigningKey: string | null
+  /** Minimum log level for `src/lib/logger.ts`. Default 'info'. Set via
+   *  `PDS_LOG_LEVEL=debug` etc. See chapter 18. */
+  logLevel: LogLevel
+  /** When true, the `/metrics` endpoint serves Prometheus exposition.
+   *  Default false — scrape endpoints are sensitive; opt in deliberately and
+   *  wrap them behind a reverse proxy ACL. See chapter 18. */
+  metricsEnabled: boolean
 }
 
 let cached: PdsConfig | null = null
@@ -66,8 +75,25 @@ export function getConfig(): PdsConfig {
     adminPasswordHash,
     inviteRequired: process.env.PDS_INVITE_REQUIRED === 'true',
     oauthSigningKey,
+    logLevel: resolveLogLevel(),
+    metricsEnabled: process.env.PDS_METRICS === 'true',
   }
   return cached
+}
+
+function resolveLogLevel(): LogLevel {
+  const raw = (process.env.PDS_LOG_LEVEL ?? '').toLowerCase()
+  if (
+    raw === 'trace' ||
+    raw === 'debug' ||
+    raw === 'info' ||
+    raw === 'warn' ||
+    raw === 'error' ||
+    raw === 'fatal'
+  ) {
+    return raw
+  }
+  return 'info'
 }
 
 function resolveOauthSigningKey(): string | null {

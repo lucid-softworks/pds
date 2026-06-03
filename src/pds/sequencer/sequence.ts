@@ -28,6 +28,7 @@ import { db } from '~/lib/db'
 // Imported directly because the coordinator wires the barrel re-export at
 // merge time. Once it does, this should switch to `from '~/lib/db/schema'`.
 import { repoSeq } from '~/lib/db/schema'
+import { firehoseEventsTotal } from '~/lib/metrics'
 import { encode, type CID } from '~/pds/codec'
 
 // `db` is a union of pglite and postgres-js drivers (two `PgDatabase`
@@ -89,6 +90,7 @@ export async function emitCommit(event: CommitEvent): Promise<number> {
     time: new Date().toISOString(),
   }
   await writeEvent(seq, payload)
+  firehoseEventsTotal.inc({ event_type: 'commit' })
   return seq
 }
 
@@ -102,6 +104,7 @@ export async function emitIdentity(event: IdentityEvent): Promise<number> {
     ...(event.handle !== undefined ? { handle: event.handle } : {}),
   }
   await writeEvent(seq, payload)
+  firehoseEventsTotal.inc({ event_type: 'identity' })
   return seq
 }
 
@@ -116,6 +119,7 @@ export async function emitAccount(event: AccountEvent): Promise<number> {
     ...(event.status !== undefined ? { status: event.status } : {}),
   }
   await writeEvent(seq, payload)
+  firehoseEventsTotal.inc({ event_type: 'account' })
   return seq
 }
 
@@ -135,6 +139,7 @@ export async function emitTombstone(args: {
     time: (args.time ?? new Date()).toISOString(),
   }
   await writeEvent(seq, payload)
+  firehoseEventsTotal.inc({ event_type: 'tombstone' })
   return seq
 }
 

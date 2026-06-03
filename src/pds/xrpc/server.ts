@@ -8,9 +8,22 @@
 // handler still owns the contract. Setting `LEXICON_STRICT=true` turns the
 // observe-only check into a hard rejection. The plan for chapter 9's
 // follow-up is to flip that env var once the log is clean.
+//
+// Every dispatched call emits one structured log line — `nsid`, `method`,
+// `status`, `durationMs`, and (best-effort) the caller's `did` parsed
+// without verification from the Authorization JWT — plus a `pds_xrpc_*`
+// metric. Expected client errors (`XrpcError`) log at info; unexpected
+// errors log at error with the stack on `err`.
 
+import { getLogger } from '~/lib/logger'
+import {
+  xrpcRequestDurationSeconds,
+  xrpcRequestsTotal,
+} from '~/lib/metrics'
 import { XrpcError, InternalError, BadRequest, NotFound } from './errors'
 import { validateInbound, validateOutbound } from './lexicon-bridge'
+
+const log = getLogger('xrpc')
 
 export type HandlerCtx = {
   /** The parsed JSON body for procedures, or undefined for queries. */
@@ -68,17 +81,40 @@ export async function dispatch(
   nsid: string,
   request: Request,
 ): Promise<Response> {
+  const start = performance.now()
+  const method = request.method
+  const did = peekDidFromAuth(request.headers.get('authorization') ?? undefined)
+  const reqLog = log.with({
+    nsid,
+    method,
+    ...(did !== undefined ? { did } : {}),
+  })
+
+  const respond = (res: Response): Response => {
+    const durationMs = performance.now() - start
+    xrpcRequestsTotal.inc({ nsid, method, status: String(res.status) })
+    xrpcRequestDurationSeconds.observe({ nsid, method }, durationMs / 1000)
+    // Successful + expected-client-error paths are info; the 5xx path logs
+    // at error from the catch below before we get here.
+    if (res.status < 500) {
+      reqLog.info('xrpc-request', { status: res.status, durationMs })
+    }
+    return res
+  }
+
   const def = registry.get(nsid)
   if (!def) {
-    return jsonResponse(
-      NotFound(`unknown XRPC method: ${nsid}`, 'MethodNotImplemented'),
+    return respond(
+      jsonResponse(NotFound(`unknown XRPC method: ${nsid}`, 'MethodNotImplemented')),
     )
   }
   if (request.method !== def.method) {
-    return jsonResponse(
-      BadRequest(
-        `expected ${def.method} for ${nsid}, got ${request.method}`,
-        'InvalidRequest',
+    return respond(
+      jsonResponse(
+        BadRequest(
+          `expected ${def.method} for ${nsid}, got ${request.method}`,
+          'InvalidRequest',
+        ),
       ),
     )
   }
@@ -102,24 +138,30 @@ export async function dispatch(
     // Binary handlers (e.g. sync.getRepo, sync.getBlob) build their own
     // Response so they can stream CAR / blob bytes; pass it through unchanged
     // rather than JSON-stringifying it.
-    if (output instanceof Response) return output
+    if (output instanceof Response) return respond(output)
 
     await validateOutbound(nsid, output)
 
-    return new Response(
-      output === undefined ? '' : JSON.stringify(output),
-      {
-        status: 200,
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-          'cache-control': 'no-store',
+    return respond(
+      new Response(
+        output === undefined ? '' : JSON.stringify(output),
+        {
+          status: 200,
+          headers: {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': 'no-store',
+          },
         },
-      },
+      ),
     )
   } catch (err) {
-    if (err instanceof XrpcError) return jsonResponse(err)
-    console.error(`[xrpc:${nsid}]`, err)
-    return jsonResponse(InternalError())
+    if (err instanceof XrpcError) return respond(jsonResponse(err))
+    const durationMs = performance.now() - start
+    reqLog.error('xrpc-request-failed', {
+      durationMs,
+      err: err instanceof Error ? err : new Error(String(err)),
+    })
+    return respond(jsonResponse(InternalError()))
   }
 }
 
@@ -131,4 +173,28 @@ function jsonResponse(err: XrpcError): Response {
       'cache-control': 'no-store',
     },
   })
+}
+
+/** Best-effort DID peek for logging. Decodes the JWT payload without verifying
+ *  the signature — the handler does the real verification. Returns undefined
+ *  for anything that doesn't look like a JWT with a `sub` claim. */
+function peekDidFromAuth(authorization: string | undefined): string | undefined {
+  if (!authorization) return undefined
+  const trimmed = authorization.trim()
+  const match = /^(?:bearer|dpop)\s+(.+)$/i.exec(trimmed)
+  if (!match || !match[1]) return undefined
+  const token = match[1].trim()
+  const parts = token.split('.')
+  if (parts.length !== 3) return undefined
+  const payload = parts[1]
+  if (!payload) return undefined
+  try {
+    const json = Buffer.from(payload, 'base64url').toString('utf8')
+    const claims = JSON.parse(json) as { sub?: unknown; did?: unknown }
+    const sub = typeof claims.sub === 'string' ? claims.sub : undefined
+    const altDid = typeof claims.did === 'string' ? claims.did : undefined
+    return sub ?? altDid
+  } catch {
+    return undefined
+  }
 }

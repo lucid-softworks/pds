@@ -57,6 +57,41 @@ export async function attachFirehose(
 
   const wss = new WebSocketServer({ noServer: true })
 
+  // Graceful shutdown: close every live firehose socket with 1001 (going
+  // away) so reconnecting consumers don't think they hit a server bug. We
+  // register lazily via SSR-loaded shutdown to keep this file `~/*`-free at
+  // top level (see header note about config bundling).
+  try {
+    const shutdownMod = (await vite.ssrLoadModule(
+      new URL('../../lib/shutdown.ts', import.meta.url).pathname,
+    )) as typeof import('../../lib/shutdown')
+    shutdownMod.onShutdown('firehose-ws', async () => {
+      for (const client of wss.clients) {
+        try {
+          client.close(1001, 'server shutting down')
+        } catch {
+          // socket already torn down
+        }
+      }
+      await new Promise<void>((resolve) => wss.close(() => resolve()))
+    })
+    // Also wire DB teardown from here — the firehose mount is the only
+    // bootstrap-time hook we have under the Vite dev server. In production
+    // (Nitro / Node entry) the same `~/lib/shutdown` API is the wiring
+    // point; the dev server documents this caveat in chapter 18.
+    const dbMod = (await vite.ssrLoadModule(
+      new URL('../../lib/db/index.ts', import.meta.url).pathname,
+    )) as typeof import('../../lib/db')
+    shutdownMod.onShutdown('db', async () => {
+      await dbMod.closeDb()
+    })
+  } catch (err) {
+    // Shutdown wiring is best-effort; the dev server keeps running either
+    // way. Log via console because the logger import would itself need the
+    // SSR-loaded path.
+    console.error('[firehose] failed to register shutdown handler', err)
+  }
+
   server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
     const url = req.url ?? ''
     const path = url.split('?', 1)[0] ?? ''

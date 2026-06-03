@@ -6,10 +6,12 @@
 //
 // See chapter 15 — Blobs.
 
+import { eq } from 'drizzle-orm'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { CID } from 'multiformats/cid'
 import { db } from '~/lib/db'
 import { blobs } from '~/lib/db/schema'
+import { blobUploadBytesTotal, blobsTotal } from '~/lib/metrics'
 import { getBlobStore } from './store'
 
 // AT Protocol assigns blobs the `raw` multicodec (0x55) because their bytes
@@ -54,6 +56,16 @@ export async function uploadBlob(args: {
   // Upsert by CID. Repeated uploads of the same bytes by the same account are
   // a no-op at the metadata layer; the store has already overwritten the file
   // with identical contents.
+  //
+  // We probe for the pre-existing row first so we can tell "fresh insert"
+  // from "dedup hit" for metrics. Drizzle's `.returning()` overload doesn't
+  // narrow cleanly across the pglite|postgres-js union (same issue noted in
+  // sequence.ts) so a SELECT is the portable shape.
+  const existing = await db
+    .select({ cid: blobs.cid })
+    .from(blobs)
+    .where(eq(blobs.cid, cidStr))
+    .limit(1)
   await db
     .insert(blobs)
     .values({
@@ -64,6 +76,11 @@ export async function uploadBlob(args: {
       storeKey,
     })
     .onConflictDoNothing()
+  // Always credit the bytes-uploaded counter (the operator wants to see
+  // load even when the upload was a dedup hit). Only increment the row
+  // counter on a fresh insert.
+  blobUploadBytesTotal.inc(undefined, args.bytes.length)
+  if (existing.length === 0) blobsTotal.inc()
   return {
     $type: 'blob',
     ref: cid,

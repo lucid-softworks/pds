@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as AppRouteRouteImport } from './routes/app/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DocsIndexRouteImport } from './routes/docs/index'
@@ -23,6 +24,11 @@ import { Route as DocsSlugRouteImport } from './routes/docs/$slug'
 import { Route as AppFeedRouteImport } from './routes/app/feed'
 import { Route as AppComposeRouteImport } from './routes/app/compose'
 
+const MetricsRoute = MetricsRouteImport.update({
+  id: '/metrics',
+  path: '/metrics',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppRouteRoute = AppRouteRouteImport.update({
   id: '/app',
   path: '/app',
@@ -92,6 +98,7 @@ const AppComposeRoute = AppComposeRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteRouteWithChildren
+  '/metrics': typeof MetricsRoute
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/metrics': typeof MetricsRoute
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
@@ -122,6 +130,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteRouteWithChildren
+  '/metrics': typeof MetricsRoute
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
@@ -139,6 +148,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/metrics'
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
@@ -153,6 +163,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/metrics'
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
@@ -168,6 +179,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/app'
+    | '/metrics'
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
@@ -184,6 +196,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRouteRoute: typeof AppRouteRouteWithChildren
+  MetricsRoute: typeof MetricsRoute
   DocsSlugRoute: typeof DocsSlugRoute
   OauthAuthorizeRoute: typeof OauthAuthorizeRoute
   OauthJwksRoute: typeof OauthJwksRoute
@@ -196,6 +209,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/metrics': {
+      id: '/metrics'
+      path: '/metrics'
+      fullPath: '/metrics'
+      preLoaderRoute: typeof MetricsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app': {
       id: '/app'
       path: '/app'
@@ -309,6 +329,7 @@ const AppRouteRouteWithChildren = AppRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRouteRoute: AppRouteRouteWithChildren,
+  MetricsRoute: MetricsRoute,
   DocsSlugRoute: DocsSlugRoute,
   OauthAuthorizeRoute: OauthAuthorizeRoute,
   OauthJwksRoute: OauthJwksRoute,
