@@ -9,8 +9,10 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as AppRouteRouteImport } from './routes/app/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DocsIndexRouteImport } from './routes/docs/index'
+import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as XrpcNsidRouteImport } from './routes/xrpc/$nsid'
 import { Route as OauthTokenRouteImport } from './routes/oauth/token'
 import { Route as OauthRevokeRouteImport } from './routes/oauth/revoke'
@@ -18,7 +20,14 @@ import { Route as OauthParRouteImport } from './routes/oauth/par'
 import { Route as OauthJwksRouteImport } from './routes/oauth/jwks'
 import { Route as OauthAuthorizeRouteImport } from './routes/oauth/authorize'
 import { Route as DocsSlugRouteImport } from './routes/docs/$slug'
+import { Route as AppFeedRouteImport } from './routes/app/feed'
+import { Route as AppComposeRouteImport } from './routes/app/compose'
 
+const AppRouteRoute = AppRouteRouteImport.update({
+  id: '/app',
+  path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -28,6 +37,11 @@ const DocsIndexRoute = DocsIndexRouteImport.update({
   id: '/docs/',
   path: '/docs/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRouteRoute,
 } as any)
 const XrpcNsidRoute = XrpcNsidRouteImport.update({
   id: '/xrpc/$nsid',
@@ -64,9 +78,22 @@ const DocsSlugRoute = DocsSlugRouteImport.update({
   path: '/docs/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppFeedRoute = AppFeedRouteImport.update({
+  id: '/feed',
+  path: '/feed',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppComposeRoute = AppComposeRouteImport.update({
+  id: '/compose',
+  path: '/compose',
+  getParentRoute: () => AppRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/app': typeof AppRouteRouteWithChildren
+  '/app/compose': typeof AppComposeRoute
+  '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/jwks': typeof OauthJwksRoute
@@ -74,10 +101,13 @@ export interface FileRoutesByFullPath {
   '/oauth/revoke': typeof OauthRevokeRoute
   '/oauth/token': typeof OauthTokenRoute
   '/xrpc/$nsid': typeof XrpcNsidRoute
+  '/app/': typeof AppIndexRoute
   '/docs/': typeof DocsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/app/compose': typeof AppComposeRoute
+  '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/jwks': typeof OauthJwksRoute
@@ -85,11 +115,15 @@ export interface FileRoutesByTo {
   '/oauth/revoke': typeof OauthRevokeRoute
   '/oauth/token': typeof OauthTokenRoute
   '/xrpc/$nsid': typeof XrpcNsidRoute
+  '/app': typeof AppIndexRoute
   '/docs': typeof DocsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/app': typeof AppRouteRouteWithChildren
+  '/app/compose': typeof AppComposeRoute
+  '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/jwks': typeof OauthJwksRoute
@@ -97,12 +131,16 @@ export interface FileRoutesById {
   '/oauth/revoke': typeof OauthRevokeRoute
   '/oauth/token': typeof OauthTokenRoute
   '/xrpc/$nsid': typeof XrpcNsidRoute
+  '/app/': typeof AppIndexRoute
   '/docs/': typeof DocsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/app'
+    | '/app/compose'
+    | '/app/feed'
     | '/docs/$slug'
     | '/oauth/authorize'
     | '/oauth/jwks'
@@ -110,10 +148,13 @@ export interface FileRouteTypes {
     | '/oauth/revoke'
     | '/oauth/token'
     | '/xrpc/$nsid'
+    | '/app/'
     | '/docs/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/app/compose'
+    | '/app/feed'
     | '/docs/$slug'
     | '/oauth/authorize'
     | '/oauth/jwks'
@@ -121,10 +162,14 @@ export interface FileRouteTypes {
     | '/oauth/revoke'
     | '/oauth/token'
     | '/xrpc/$nsid'
+    | '/app'
     | '/docs'
   id:
     | '__root__'
     | '/'
+    | '/app'
+    | '/app/compose'
+    | '/app/feed'
     | '/docs/$slug'
     | '/oauth/authorize'
     | '/oauth/jwks'
@@ -132,11 +177,13 @@ export interface FileRouteTypes {
     | '/oauth/revoke'
     | '/oauth/token'
     | '/xrpc/$nsid'
+    | '/app/'
     | '/docs/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRouteRoute: typeof AppRouteRouteWithChildren
   DocsSlugRoute: typeof DocsSlugRoute
   OauthAuthorizeRoute: typeof OauthAuthorizeRoute
   OauthJwksRoute: typeof OauthJwksRoute
@@ -149,6 +196,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -162,6 +216,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/docs/'
       preLoaderRoute: typeof DocsIndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/app/': {
+      id: '/app/'
+      path: '/'
+      fullPath: '/app/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRouteRoute
     }
     '/xrpc/$nsid': {
       id: '/xrpc/$nsid'
@@ -212,11 +273,42 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocsSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/feed': {
+      id: '/app/feed'
+      path: '/feed'
+      fullPath: '/app/feed'
+      preLoaderRoute: typeof AppFeedRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/app/compose': {
+      id: '/app/compose'
+      path: '/compose'
+      fullPath: '/app/compose'
+      preLoaderRoute: typeof AppComposeRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
   }
 }
 
+interface AppRouteRouteChildren {
+  AppComposeRoute: typeof AppComposeRoute
+  AppFeedRoute: typeof AppFeedRoute
+  AppIndexRoute: typeof AppIndexRoute
+}
+
+const AppRouteRouteChildren: AppRouteRouteChildren = {
+  AppComposeRoute: AppComposeRoute,
+  AppFeedRoute: AppFeedRoute,
+  AppIndexRoute: AppIndexRoute,
+}
+
+const AppRouteRouteWithChildren = AppRouteRoute._addFileChildren(
+  AppRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRouteRoute: AppRouteRouteWithChildren,
   DocsSlugRoute: DocsSlugRoute,
   OauthAuthorizeRoute: OauthAuthorizeRoute,
   OauthJwksRoute: OauthJwksRoute,

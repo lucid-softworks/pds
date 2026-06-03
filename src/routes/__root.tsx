@@ -58,6 +58,13 @@ function RootDocument({ children }: { children: ReactNode }) {
               >
                 Docs
               </Link>
+              <Link
+                to="/app"
+                className="hover:text-[var(--color-fg)] transition-colors"
+                activeProps={{ className: 'text-[var(--color-fg)]' }}
+              >
+                App
+              </Link>
               <a
                 href="https://atproto.com"
                 target="_blank"
