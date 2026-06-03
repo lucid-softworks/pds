@@ -16,7 +16,7 @@ const handler: Handler = async () => {
   return {
     did: cfg.serviceDid,
     availableUserDomains: ['.' + cfg.hostname],
-    inviteCodeRequired: false,
+    inviteCodeRequired: cfg.inviteRequired,
     phoneVerificationRequired: false,
     links: {},
     contact: {},

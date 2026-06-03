@@ -279,8 +279,8 @@ systemctl daemon-reload
 systemctl enable --now pds
 systemctl restart caddy
 
-ufw --force allow OpenSSH >/dev/null
-ufw --force allow 80,443/tcp >/dev/null
+ufw allow OpenSSH >/dev/null
+ufw allow 80,443/tcp >/dev/null
 ufw --force enable >/dev/null
 
 echo
