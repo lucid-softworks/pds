@@ -64,4 +64,11 @@ function setCorsHeaders(headers: Headers): void {
   // Cache preflights for an hour. The lexicon set + our header list are
   // stable per deploy; longer is fine, shorter would just add load.
   headers.set('access-control-max-age', '3600')
+  // Modern browser default — limits how much URL info leaks out of this
+  // origin when a client navigates away. Doesn't silence the Firefox
+  // warning about *inbound* requests' looser policies (that's the
+  // caller's setting, not ours), but is the right header to publish.
+  headers.set('referrer-policy', 'strict-origin-when-cross-origin')
+  // Block content-sniffing — clients should believe our content-type.
+  headers.set('x-content-type-options', 'nosniff')
 }

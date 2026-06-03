@@ -59,8 +59,17 @@ const handler: Handler = async ({ input, authorization, dpopProof, request }) =>
     console.warn(`[updateHandle] handle uses reserved TLD: ${newHandle}`)
   }
 
-  // No-op: already this handle.
-  if (newHandle === me.handle) return undefined
+  // Same-handle path: skip the PLC rotation (nothing to change) but still
+  // emit an `#identity` firehose event so AppViews / Relays re-run their
+  // handle verification. This is the documented "kick the AppView" knob
+  // when a freshly-published TXT / .well-known/atproto-did handshake
+  // hasn't propagated through the identity cache yet — bsky.app shows
+  // `⚠ Invalid handle` for cached failures and the easiest way out is
+  // to nudge.
+  if (newHandle === me.handle) {
+    await emitIdentity({ did: me.did, handle: newHandle })
+    return undefined
+  }
 
   // Availability: any local row with this handle must be ours (which we
   // already ruled out above) or unclaimed.

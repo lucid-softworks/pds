@@ -26,6 +26,8 @@ const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-headers': ALLOW_HEADERS,
   'access-control-expose-headers': EXPOSE_HEADERS,
   'access-control-max-age': '3600',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'x-content-type-options': 'nosniff',
 }
 
 export function corsVitePlugin(): Plugin {
