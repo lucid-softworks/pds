@@ -30,7 +30,7 @@ import { CID } from 'multiformats/cid'
 import { db } from '~/lib/db'
 // Imported directly because the coordinator owns `~/lib/db/schema/index.ts`.
 // Once they add the re-export this should switch to `from '~/lib/db/schema'`.
-import { adminAudit, type AdminAuditRow } from '~/lib/db/schema/audit'
+import { adminAudit, type AdminAuditRow } from '~/lib/db/schema'
 import { decode, encode } from '~/pds/codec'
 import type { Handler, HandlerCtx } from '~/pds/xrpc/server'
 
