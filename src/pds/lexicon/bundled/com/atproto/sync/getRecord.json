@@ -1,14 +1,41 @@
 {
   "lexicon": 1,
   "id": "com.atproto.sync.getRecord",
-  "description": "TODO: full schema in a future session.",
   "defs": {
     "main": {
       "type": "query",
+      "description": "Get data blocks needed to prove the existence or non-existence of a record in the current version of a repo. Does not require auth.",
+      "parameters": {
+        "type": "params",
+        "required": ["did", "collection", "rkey"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the repo."
+          },
+          "collection": { "type": "string", "format": "nsid" },
+          "rkey": {
+            "type": "string",
+            "description": "Record Key."
+          },
+          "commit": {
+            "type": "string",
+            "format": "cid",
+            "description": "DEPRECATED: referenced a repo commit by CID."
+          }
+        }
+      },
       "output": {
-        "encoding": "application/json",
-        "schema": { "type": "object", "properties": {} }
-      }
+        "encoding": "application/vnd.ipld.car"
+      },
+      "errors": [
+        { "name": "RecordNotFound" },
+        { "name": "RepoNotFound" },
+        { "name": "RepoTakendown" },
+        { "name": "RepoSuspended" },
+        { "name": "RepoDeactivated" }
+      ]
     }
   }
 }

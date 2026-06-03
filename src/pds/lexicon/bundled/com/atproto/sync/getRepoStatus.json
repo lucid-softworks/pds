@@ -1,14 +1,44 @@
 {
   "lexicon": 1,
   "id": "com.atproto.sync.getRepoStatus",
-  "description": "TODO: full schema in a future session.",
   "defs": {
     "main": {
       "type": "query",
+      "description": "Get the hosting status for a repository, on this server. Expected to be implemented by PDS and Relay.",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the repo."
+          }
+        }
+      },
       "output": {
         "encoding": "application/json",
-        "schema": { "type": "object", "properties": {} }
-      }
+        "schema": {
+          "type": "object",
+          "required": ["did", "active"],
+          "properties": {
+            "did": { "type": "string", "format": "did" },
+            "active": { "type": "boolean" },
+            "status": {
+              "type": "string",
+              "description": "If active=false, an optional status describing why.",
+              "knownValues": ["takendown", "suspended", "deleted", "deactivated", "desynchronized", "throttled"]
+            },
+            "rev": {
+              "type": "string",
+              "description": "Optional field, the current rev of the repo, if active=true."
+            }
+          }
+        }
+      },
+      "errors": [
+        { "name": "RepoNotFound" }
+      ]
     }
   }
 }

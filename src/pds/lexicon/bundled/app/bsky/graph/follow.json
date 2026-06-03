@@ -1,12 +1,19 @@
 {
   "lexicon": 1,
   "id": "app.bsky.graph.follow",
-  "description": "TODO: full schema in a future session. Stub allows the lexicon catalog to resolve refs to this NSID without breaking the validator.",
   "defs": {
     "main": {
       "type": "record",
+      "description": "Record declaring a social 'follow' relationship of another account.",
       "key": "tid",
-      "record": { "type": "object", "properties": {} }
+      "record": {
+        "type": "object",
+        "required": ["subject", "createdAt"],
+        "properties": {
+          "subject": { "type": "string", "format": "did" },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
     }
   }
 }

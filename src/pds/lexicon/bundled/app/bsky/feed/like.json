@@ -1,12 +1,19 @@
 {
   "lexicon": 1,
   "id": "app.bsky.feed.like",
-  "description": "TODO: full schema in a future session. Stub allows the lexicon catalog to resolve refs to this NSID without breaking the validator.",
   "defs": {
     "main": {
       "type": "record",
+      "description": "Record declaring a 'like' of a piece of subject content.",
       "key": "tid",
-      "record": { "type": "object", "properties": {} }
+      "record": {
+        "type": "object",
+        "required": ["subject", "createdAt"],
+        "properties": {
+          "subject": { "type": "ref", "ref": "com.atproto.repo.strongRef" },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
     }
   }
 }

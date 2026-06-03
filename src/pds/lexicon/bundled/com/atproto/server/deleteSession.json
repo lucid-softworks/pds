@@ -1,14 +1,10 @@
 {
   "lexicon": 1,
   "id": "com.atproto.server.deleteSession",
-  "description": "TODO: full schema in a future session.",
   "defs": {
     "main": {
       "type": "procedure",
-      "input": {
-        "encoding": "application/json",
-        "schema": { "type": "object", "properties": {} }
-      }
+      "description": "Delete the current session. Requires auth."
     }
   }
 }

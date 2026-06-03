@@ -1,13 +1,47 @@
 {
   "lexicon": 1,
   "id": "com.atproto.server.describeServer",
-  "description": "TODO: full schema in a future session.",
   "defs": {
     "main": {
       "type": "query",
+      "description": "Describes the server's account creation requirements and capabilities.",
       "output": {
         "encoding": "application/json",
-        "schema": { "type": "object", "properties": {} }
+        "schema": {
+          "type": "object",
+          "required": ["did", "availableUserDomains"],
+          "properties": {
+            "inviteCodeRequired": {
+              "type": "boolean",
+              "description": "If true, an invite code must be supplied to create an account."
+            },
+            "phoneVerificationRequired": {
+              "type": "boolean",
+              "description": "If true, a phone verification token must be supplied to create an account."
+            },
+            "availableUserDomains": {
+              "type": "array",
+              "description": "List of domain suffixes that can be used in account handles.",
+              "items": { "type": "string" }
+            },
+            "links": { "type": "ref", "ref": "#links" },
+            "contact": { "type": "ref", "ref": "#contact" },
+            "did": { "type": "string", "format": "did" }
+          }
+        }
+      }
+    },
+    "links": {
+      "type": "object",
+      "properties": {
+        "privacyPolicy": { "type": "string", "format": "uri" },
+        "termsOfService": { "type": "string", "format": "uri" }
+      }
+    },
+    "contact": {
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" }
       }
     }
   }

@@ -1,14 +1,34 @@
 {
   "lexicon": 1,
   "id": "com.atproto.sync.getRepo",
-  "description": "TODO: full schema in a future session.",
   "defs": {
     "main": {
       "type": "query",
+      "description": "Download a repository export as a CAR file. Optionally provide a 'since' commit to get a partial diff. Does not require auth.",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID of the repo."
+          },
+          "since": {
+            "type": "string",
+            "description": "The revision ('rev') of the repo to create a diff from."
+          }
+        }
+      },
       "output": {
-        "encoding": "application/json",
-        "schema": { "type": "object", "properties": {} }
-      }
+        "encoding": "application/vnd.ipld.car"
+      },
+      "errors": [
+        { "name": "RepoNotFound" },
+        { "name": "RepoTakendown" },
+        { "name": "RepoSuspended" },
+        { "name": "RepoDeactivated" }
+      ]
     }
   }
 }
