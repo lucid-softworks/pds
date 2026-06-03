@@ -193,6 +193,122 @@ This is the property "personal" data servers gain you. The data isn't
 locked to the operator; the operator is a configurable detail of the
 identity.
 
+## The PDS as a proxy
+
+Sync endpoints are how an AppView ingests *everyone's* PDS. That
+covers the *read* path into the AppView's index. But there's a second
+edge that needs explaining: how does **the user's client** reach the
+AppView in the first place?
+
+A Bluesky client (the official iOS/Android app, bsky.app in the
+browser, anything built on `@atproto/api`) calls *every* XRPC method
+against its user's PDS. That's a deliberate convention — the client
+only ever needs to know one URL, the user's PDS, and the PDS forwards
+anything outside its namespace to the right downstream service.
+
+So when bsky.app on `https://bsky.app` wants
+`app.bsky.actor.getProfile`, it doesn't send the request to
+`api.bsky.app`. It sends:
+
+```http
+GET /xrpc/app.bsky.actor.getProfile?actor=did:plc:abc HTTP/1.1
+Host: wickwork.cafe
+Authorization: Bearer <pds-access-jwt>
+Atproto-Proxy: did:web:api.bsky.app#bsky_appview
+```
+
+…to **the user's PDS** (`wickwork.cafe`). The `Atproto-Proxy` header
+tells the PDS: *forward this to the service identified by
+`did:web:api.bsky.app`'s `#bsky_appview` entry, on my behalf.* The PDS
+responds with whatever the AppView responded with.
+
+### What the PDS does on the forward
+
+[`src/pds/xrpc/proxy.ts`](../src/pds/xrpc/proxy.ts) is the whole
+implementation. Lifecycle of one proxied request:
+
+1. **Auth check.** The dispatcher runs `requireEitherAuth` on the
+   incoming bearer — either a legacy session JWT or an OAuth
+   DPoP-bound token. We need to know *who* is calling so we can sign
+   for them.
+2. **Header parse.** Split `did:web:api.bsky.app#bsky_appview` into
+   `(did, serviceId)`. A leading-hash or missing-hash is a 400.
+3. **Target resolution.** Resolve the target DID (`did:web:` is HTTP,
+   `did:plc:` is plc.directory; chapter 4) and look up the `service`
+   array entry whose `id` matches `#<serviceId>`. Reject if the
+   `serviceEndpoint` isn't `http(s)://…`.
+4. **Service-auth mint.** Load the caller's repo signing key (the
+   same k256 key that signs MST commits — chapter 7), build a JWT:
+
+   ```json
+   {
+     "alg": "ES256K",
+     "typ": "JWT"
+   }
+   .
+   {
+     "iss": "did:plc:<caller>",
+     "aud": "did:web:api.bsky.app",
+     "lxm": "app.bsky.actor.getProfile",
+     "iat": 1717512345,
+     "exp": 1717512405,
+     "jti": "<random>"
+   }
+   ```
+
+   Signed ES256K with the caller's private signing key. The AppView
+   resolves the caller's DID document and verifies the signature
+   against the published public key — the same verification path it
+   uses for repo commits, so no extra trust infrastructure.
+
+5. **Forward.** New `fetch()` to `<serviceEndpoint>/xrpc/<nsid><query>`,
+   with the original method, body, and most headers. The bearer token
+   is replaced with the freshly-minted service-auth; `host`,
+   `content-length`, `connection` (hop-by-hop), and `atproto-proxy`
+   itself are stripped.
+6. **Stream back.** The upstream response body, status, statusText,
+   and non-hop-by-hop headers flow straight back to the client.
+
+The whole thing takes ~10 lines of dispatcher integration in
+`src/pds/xrpc/server.ts` — the proxy branch runs *before* the local
+handler lookup, so when bsky.app sends an `app.bsky.*` call, we never
+even look in our registry.
+
+### Why service-auth and not just forwarding the bearer
+
+The PDS's access JWT is HS256-signed with `PDS_JWT_SECRET`. The
+AppView doesn't know that secret — it can't verify our access tokens.
+Conversely, the AppView *can* verify the caller's repo signing key,
+because that key is published in the caller's DID document, which is
+public, content-addressed identity. So service-auth (ES256K JWT
+signed by the caller) is the only authentication that works across
+the PDS↔AppView boundary without a shared secret.
+
+Short TTL (60s) is the protocol convention — the AppView never sees
+a re-usable token, just a single-request capability.
+
+### Other services that ride the same rail
+
+Same shape, different DID:
+
+- **Chat** — `chat.bsky.*` → `did:web:chat.bsky.app#bsky_chat`
+- **Labelers** — `app.bsky.labeler.*` → labeler-specific DID
+- **Ozone** moderation — `tools.ozone.*` → instance DID
+- **AppView discovery** — `app.bsky.unspecced.getConfig` → AppView
+
+The client decides which `Atproto-Proxy` to set per request. The PDS
+doesn't care what NSID is being proxied; it just forwards anything
+with the header and rejects (404 `XrpcProxyTargetNotFound`) when the
+target DID has no matching service.
+
+Result: bsky.app at `https://bsky.app`, an alternate client, your
+own React Native app — all of them treat your PDS at `wickwork.cafe`
+as the single entry point. Profile lookups, timeline fetches,
+notifications, DMs, moderation reports — every one of them tunnels
+through your PDS to the AppView/chat/Ozone service that knows the
+answer. The PDS stays the small, federated piece of the puzzle while
+clients enjoy the illusion of one URL.
+
 ## Try it
 
 Once the sync endpoints are live, you can poke them directly. Spin up

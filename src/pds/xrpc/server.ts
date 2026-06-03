@@ -21,8 +21,10 @@ import {
   xrpcRequestDurationSeconds,
   xrpcRequestsTotal,
 } from '~/lib/metrics'
+import { requireEitherAuth } from '~/pds/auth/middleware'
 import { XrpcError, InternalError, BadRequest, NotFound } from './errors'
 import { validateInbound, validateOutbound } from './lexicon-bridge'
+import { dispatchViaProxy } from './proxy'
 import {
   callerIpFromRequest,
   getRateLimitStore,
@@ -106,6 +108,34 @@ export async function dispatch(
       reqLog.info('xrpc-request', { status: res.status, durationMs })
     }
     return res
+  }
+
+  // PDS-as-proxy: when the client sends `Atproto-Proxy: <did>#<svc>`, we
+  // forward the call upstream (typically the user's AppView / chat /
+  // labeler) signed with a fresh service-auth JWT minted from their repo
+  // signing key. The local handler registry is bypassed — app.bsky.* and
+  // chat.bsky.* never live here. See chapter 17 + src/pds/xrpc/proxy.ts.
+  const proxyHeader = request.headers.get('atproto-proxy')
+  if (proxyHeader) {
+    try {
+      const auth = await requireEitherAuth({
+        authorization: request.headers.get('authorization') ?? undefined,
+        dpopProof: request.headers.get('dpop') ?? undefined,
+        request,
+      })
+      const res = await dispatchViaProxy({
+        nsid,
+        request,
+        callerDid: auth.did,
+      })
+      return respond(res)
+    } catch (err) {
+      if (err instanceof XrpcError) return respond(jsonResponse(err))
+      reqLog.error('xrpc-proxy-failed', {
+        err: { name: (err as Error).name, message: (err as Error).message },
+      })
+      return respond(jsonResponse(InternalError()))
+    }
   }
 
   const def = registry.get(nsid)
