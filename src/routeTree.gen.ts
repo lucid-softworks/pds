@@ -14,6 +14,7 @@ import { Route as AppRouteRouteImport } from './routes/app/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DocsIndexRouteImport } from './routes/docs/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
+import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as XrpcNsidRouteImport } from './routes/xrpc/$nsid'
 import { Route as OauthTokenRouteImport } from './routes/oauth/token'
 import { Route as OauthRevokeRouteImport } from './routes/oauth/revoke'
@@ -23,6 +24,10 @@ import { Route as OauthAuthorizeRouteImport } from './routes/oauth/authorize'
 import { Route as DocsSlugRouteImport } from './routes/docs/$slug'
 import { Route as AppFeedRouteImport } from './routes/app/feed'
 import { Route as AppComposeRouteImport } from './routes/app/compose'
+import { Route as AdminSignupsRouteImport } from './routes/admin/signups'
+import { Route as AdminLogoutRouteImport } from './routes/admin/logout'
+import { Route as AdminLoginRouteImport } from './routes/admin/login'
+import { Route as AdminInvitesRouteImport } from './routes/admin/invites'
 
 const MetricsRoute = MetricsRouteImport.update({
   id: '/metrics',
@@ -48,6 +53,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppRouteRoute,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const XrpcNsidRoute = XrpcNsidRouteImport.update({
   id: '/xrpc/$nsid',
@@ -94,11 +104,35 @@ const AppComposeRoute = AppComposeRouteImport.update({
   path: '/compose',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AdminSignupsRoute = AdminSignupsRouteImport.update({
+  id: '/admin/signups',
+  path: '/admin/signups',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminLogoutRoute = AdminLogoutRouteImport.update({
+  id: '/admin/logout',
+  path: '/admin/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminLoginRoute = AdminLoginRouteImport.update({
+  id: '/admin/login',
+  path: '/admin/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminInvitesRoute = AdminInvitesRouteImport.update({
+  id: '/admin/invites',
+  path: '/admin/invites',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteRouteWithChildren
   '/metrics': typeof MetricsRoute
+  '/admin/invites': typeof AdminInvitesRoute
+  '/admin/login': typeof AdminLoginRoute
+  '/admin/logout': typeof AdminLogoutRoute
+  '/admin/signups': typeof AdminSignupsRoute
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
@@ -108,12 +142,17 @@ export interface FileRoutesByFullPath {
   '/oauth/revoke': typeof OauthRevokeRoute
   '/oauth/token': typeof OauthTokenRoute
   '/xrpc/$nsid': typeof XrpcNsidRoute
+  '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/docs/': typeof DocsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/metrics': typeof MetricsRoute
+  '/admin/invites': typeof AdminInvitesRoute
+  '/admin/login': typeof AdminLoginRoute
+  '/admin/logout': typeof AdminLogoutRoute
+  '/admin/signups': typeof AdminSignupsRoute
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
@@ -123,6 +162,7 @@ export interface FileRoutesByTo {
   '/oauth/revoke': typeof OauthRevokeRoute
   '/oauth/token': typeof OauthTokenRoute
   '/xrpc/$nsid': typeof XrpcNsidRoute
+  '/admin': typeof AdminIndexRoute
   '/app': typeof AppIndexRoute
   '/docs': typeof DocsIndexRoute
 }
@@ -131,6 +171,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/app': typeof AppRouteRouteWithChildren
   '/metrics': typeof MetricsRoute
+  '/admin/invites': typeof AdminInvitesRoute
+  '/admin/login': typeof AdminLoginRoute
+  '/admin/logout': typeof AdminLogoutRoute
+  '/admin/signups': typeof AdminSignupsRoute
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
@@ -140,6 +184,7 @@ export interface FileRoutesById {
   '/oauth/revoke': typeof OauthRevokeRoute
   '/oauth/token': typeof OauthTokenRoute
   '/xrpc/$nsid': typeof XrpcNsidRoute
+  '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/docs/': typeof DocsIndexRoute
 }
@@ -149,6 +194,10 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/metrics'
+    | '/admin/invites'
+    | '/admin/login'
+    | '/admin/logout'
+    | '/admin/signups'
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
@@ -158,12 +207,17 @@ export interface FileRouteTypes {
     | '/oauth/revoke'
     | '/oauth/token'
     | '/xrpc/$nsid'
+    | '/admin/'
     | '/app/'
     | '/docs/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/metrics'
+    | '/admin/invites'
+    | '/admin/login'
+    | '/admin/logout'
+    | '/admin/signups'
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
@@ -173,6 +227,7 @@ export interface FileRouteTypes {
     | '/oauth/revoke'
     | '/oauth/token'
     | '/xrpc/$nsid'
+    | '/admin'
     | '/app'
     | '/docs'
   id:
@@ -180,6 +235,10 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/metrics'
+    | '/admin/invites'
+    | '/admin/login'
+    | '/admin/logout'
+    | '/admin/signups'
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
@@ -189,6 +248,7 @@ export interface FileRouteTypes {
     | '/oauth/revoke'
     | '/oauth/token'
     | '/xrpc/$nsid'
+    | '/admin/'
     | '/app/'
     | '/docs/'
   fileRoutesById: FileRoutesById
@@ -197,6 +257,10 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRouteRoute: typeof AppRouteRouteWithChildren
   MetricsRoute: typeof MetricsRoute
+  AdminInvitesRoute: typeof AdminInvitesRoute
+  AdminLoginRoute: typeof AdminLoginRoute
+  AdminLogoutRoute: typeof AdminLogoutRoute
+  AdminSignupsRoute: typeof AdminSignupsRoute
   DocsSlugRoute: typeof DocsSlugRoute
   OauthAuthorizeRoute: typeof OauthAuthorizeRoute
   OauthJwksRoute: typeof OauthJwksRoute
@@ -204,6 +268,7 @@ export interface RootRouteChildren {
   OauthRevokeRoute: typeof OauthRevokeRoute
   OauthTokenRoute: typeof OauthTokenRoute
   XrpcNsidRoute: typeof XrpcNsidRoute
+  AdminIndexRoute: typeof AdminIndexRoute
   DocsIndexRoute: typeof DocsIndexRoute
 }
 
@@ -243,6 +308,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRouteRoute
+    }
+    '/admin/': {
+      id: '/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/xrpc/$nsid': {
       id: '/xrpc/$nsid'
@@ -307,6 +379,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppComposeRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/admin/signups': {
+      id: '/admin/signups'
+      path: '/admin/signups'
+      fullPath: '/admin/signups'
+      preLoaderRoute: typeof AdminSignupsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/logout': {
+      id: '/admin/logout'
+      path: '/admin/logout'
+      fullPath: '/admin/logout'
+      preLoaderRoute: typeof AdminLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/login': {
+      id: '/admin/login'
+      path: '/admin/login'
+      fullPath: '/admin/login'
+      preLoaderRoute: typeof AdminLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/invites': {
+      id: '/admin/invites'
+      path: '/admin/invites'
+      fullPath: '/admin/invites'
+      preLoaderRoute: typeof AdminInvitesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -330,6 +430,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRouteRoute: AppRouteRouteWithChildren,
   MetricsRoute: MetricsRoute,
+  AdminInvitesRoute: AdminInvitesRoute,
+  AdminLoginRoute: AdminLoginRoute,
+  AdminLogoutRoute: AdminLogoutRoute,
+  AdminSignupsRoute: AdminSignupsRoute,
   DocsSlugRoute: DocsSlugRoute,
   OauthAuthorizeRoute: OauthAuthorizeRoute,
   OauthJwksRoute: OauthJwksRoute,
@@ -337,6 +441,7 @@ const rootRouteChildren: RootRouteChildren = {
   OauthRevokeRoute: OauthRevokeRoute,
   OauthTokenRoute: OauthTokenRoute,
   XrpcNsidRoute: XrpcNsidRoute,
+  AdminIndexRoute: AdminIndexRoute,
   DocsIndexRoute: DocsIndexRoute,
 }
 export const routeTree = rootRouteImport

@@ -95,6 +95,70 @@ pnpm admin:hash 'correct-horse-battery-staple-with-extras'
 Paste the result into your secret manager / `.env` / orchestration system
 and never write the plaintext down again.
 
+## The web UI: `/admin` (handle-gated)
+
+The Basic-auth flow above is the right shape for scripts, the CLI, and any
+machine-to-machine ops. It's *not* a great fit for "I want to glance at
+the signup table from my phone." For interactive use there's a small
+web UI at `/admin`, gated by **handle**, not by the operator password.
+
+Set the env knob:
+
+```bash
+PDS_ADMIN_HANDLE=alice.test
+```
+
+…and `/admin` is reachable. Leave it unset (the default) and the routes
+404, so a misconfigured deploy doesn't accidentally expose the surface.
+
+The flow:
+
+1. Operator visits `/admin` (or any sub-route). If they're not logged in,
+   they get a small form prompting for handle + password.
+2. The form's POST handler calls the same `loginWithPassword` the XRPC
+   `createSession` uses. App passwords work here too.
+3. Before minting a session, the handler asserts the supplied handle
+   equals `PDS_ADMIN_HANDLE`. The error on mismatch is generic ("invalid
+   credentials") so a curious attacker can't probe which handle is
+   admin.
+4. On success, an HttpOnly+SameSite=Strict cookie carries a 1-hour JWT
+   scoped to `admin-ui`. Every subsequent `/admin/*` request re-checks
+   that the account's *current* handle still matches the env value —
+   so if the admin rotates their handle via `updateHandle`, UI access
+   revokes itself immediately, even before the JWT expires.
+
+Pages today:
+
+- **`/admin`** — dashboard. Same stats as the public `/` plus the five
+  newest signups and the five newest invite codes.
+- **`/admin/signups`** — every account, newest first, paginated by
+  `createdAt` cursor. Shows handle, DID, email, status, email-confirmed
+  marker, migration state.
+- **`/admin/invites`** — list of every invite code + a form to mint a
+  new one (`useCount`, optional `forAccount`) + per-row "disable"
+  buttons.
+
+POST mutations are protected by double-submit CSRF: a `pds_admin_csrf`
+non-HttpOnly cookie + a matching hidden form field, compared
+timing-safely. A cross-site form post can't read the cookie value, so it
+can't forge the hidden field — even though the browser will still
+attach the session cookie.
+
+> ⚠️ **Two parallel admin paths.** The XRPC `com.atproto.admin.*`
+> surface (HTTP Basic + `PDS_ADMIN_PASSWORD_HASH`) and the web UI
+> (handle + `PDS_ADMIN_HANDLE`) coexist by design. The XRPC surface is
+> for automation, audit logs, and tooling — it never needs a real
+> account row. The web UI is for an operator who happens to *also* be a
+> user of their own PDS, and it stays minimal: no moderation actions
+> yet, just signup visibility + invite-code management. If you want
+> takedown / activate / handle-rename through a UI, build them as
+> CLI commands or extend the web UI in a follow-up.
+
+> 📖 **Why handle, not DID?** The env var asks for a handle because
+> that's the identity the operator types when logging in. The session
+> cookie does carry the DID internally; the handle-equality check on
+> every request is just the policy gate.
+
 ## The state machine
 
 `accounts.status` is the single source of truth. Four states, with these

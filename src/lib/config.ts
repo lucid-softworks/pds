@@ -44,6 +44,11 @@ export type PdsConfig = {
    *  the SETNX EX 60 pattern but throws on first use. Wire a real Redis
    *  client in if you run multi-replica. See chapter 21 — OAuth. */
   dpopReplayStoreKind: 'in-memory' | 'redis'
+  /** Handle of the account that gates the /admin web UI. When null, /admin
+   *  is disabled (it 404s). When set, the operator logs in as their own
+   *  account through the regular session flow; /admin then checks the
+   *  current handle matches this env value. See chapter 19. */
+  adminHandle: string | null
 }
 
 let cached: PdsConfig | null = null
@@ -84,6 +89,7 @@ export function getConfig(): PdsConfig {
     metricsEnabled: process.env.PDS_METRICS === 'true',
     dpopReplayStoreKind:
       process.env.PDS_DPOP_REPLAY_STORE === 'redis' ? 'redis' : 'in-memory',
+    adminHandle: resolveAdminHandle(),
   }
   return cached
 }
@@ -133,6 +139,14 @@ function resolveAdminPasswordHash(): string | null {
   const plain = process.env.PDS_ADMIN_PASSWORD
   if (plain && plain.length > 0) return `plain:${plain}`
   return null
+}
+
+function resolveAdminHandle(): string | null {
+  const raw = process.env.PDS_ADMIN_HANDLE
+  if (!raw) return null
+  const trimmed = raw.trim().toLowerCase()
+  if (trimmed.length === 0) return null
+  return trimmed
 }
 
 function required(name: string, fallback?: string): string {
