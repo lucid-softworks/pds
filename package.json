@@ -7,8 +7,9 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite dev --port 3000",
-    "build": "vite build",
-    "start": "node .output/server/index.mjs",
+    "build": "vite build && pnpm build:server",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=esm --target=node20 --packages=external --outfile=dist/start.mjs",
+    "start": "node dist/start.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -48,6 +49,7 @@
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.1",
     "shiki": "^1.24.0",
+    "srvx": "^0.11.16",
     "unified": "^11.0.5",
     "ws": "^8.21.0",
     "zod": "^3.24.1"
