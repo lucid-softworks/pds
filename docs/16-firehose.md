@@ -396,6 +396,42 @@ boundary requires a streaming decoder. Exercise 3.)
 Try `cursor=99999999` to provoke a `FutureCursor` error frame, then
 inspect what comes back.
 
+## Verification
+
+The write side of the sequencer is unit-tested in
+`src/pds/sequencer/sequence.test.ts` — strictly-increasing seqs,
+cursor-honoring reads, the seq-in-payload round-trip. The read side — the
+`streamFirehose` loop that the WebSocket route sits on top of — is
+exercised end-to-end in `tests/integration/firehose.test.ts`. Those tests
+drive `streamFirehose` directly against a tiny in-memory `FirehoseClient`
+double, which is far faster than standing up a real WebSocket and gives us
+fine-grained control over abort timing and backpressure.
+
+The integration test pins seven behaviors:
+
+- **Replay from `cursor=0`** drains every historical row in seq order.
+- **Replay from `cursor=N`** skips rows with seq ≤ N.
+- **Live tail.** Rows emitted after the historical drain reach the client
+  within the poll interval.
+- **`FutureCursor`.** `cursor > latestSeq` produces a single `op:-1` error
+  frame and a close with code 1008, with no further frames.
+- **Abort signal.** Aborting the controller stops the loop cleanly; events
+  emitted after the abort are not seen by the client.
+- **Frame round-trip.** A `#commit` payload decodes back to the exact
+  `repo`, `rev`, `since`, `ops`, and `blocks` we passed to `emitCommit`,
+  byte-for-byte on the CAR.
+- **`#identity` and `#account`** events carry the right header tag and
+  payload shape (`did`, `handle`, `active`).
+- **`ConsumerTooSlow`.** When `bufferedFrames()` exceeds the
+  `backpressureLimit`, the loop emits an `op:-1, error:'ConsumerTooSlow'`
+  frame, closes with code 1013, and drains no further events.
+
+What these tests deliberately don't cover is the WebSocket transport
+itself — `firehose-mount.ts`'s upgrade handshake, the `ws.bufferedAmount`
+plumbing, the dev-only Vite plugin wiring. That's intentional: pulling up
+a real socket would couple the firehose tests to the Vite dev server and
+slow the suite down for no extra signal on the streaming-loop contract.
+
 ## Exercises
 
 1. Pull the `event` bytes for one of your `#commit` rows and DAG-CBOR
