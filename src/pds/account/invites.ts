@@ -18,6 +18,7 @@ import { randomBytes } from 'node:crypto'
 import { base32 } from 'multiformats/bases/base32'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core'
+import { getConfig } from '~/lib/config'
 import { db } from '~/lib/db'
 import {
   inviteCodes,
@@ -31,13 +32,21 @@ import { Unauthorized } from '~/pds/xrpc/errors'
 // `.returning` to its no-arg form, so we re-type for the column-keyed call.
 const pg = db as unknown as PgDatabase<PgQueryResultHKT>
 
-/** Produce one well-formed `pds-xxxxx-xxxxx` invite string. ~50 bits of
- *  entropy from 8 random bytes encoded as 10 chars of base32-lowercase. */
+/** Produce one well-formed `<host>-xxxxx-xxxxx` invite string. ~50 bits of
+ *  entropy from 8 random bytes encoded as 10 chars of base32-lowercase.
+ *
+ *  The prefix is the PDS hostname with `.` → `-` (e.g. `wickwork.cafe`
+ *  becomes `wickwork-cafe-`). That matches the official Bluesky PDS
+ *  convention and lets bsky.app's invite-code field accept the value via
+ *  its `^[a-z0-9-]+$` regex. A hardcoded `pds-` prefix breaks the regex
+ *  on hosts with dots (e.g. `pds.example.com`) and loses the
+ *  "which PDS minted this" signal that the prefix is meant to carry. */
 export function generateInviteCode(): string {
+  const prefix = getConfig().hostname.replaceAll('.', '-')
   // 8 bytes → 13 base32 chars (no padding from `base32.baseEncode`); we slice
   // to 10 so the human-readable form is two 5-char groups.
   const raw = base32.baseEncode(randomBytes(8)).slice(0, 10)
-  return `pds-${raw.slice(0, 5)}-${raw.slice(5, 10)}`
+  return `${prefix}-${raw.slice(0, 5)}-${raw.slice(5, 10)}`
 }
 
 /** Validate a code is currently usable by `candidateDid`, without mutating.

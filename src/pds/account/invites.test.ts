@@ -37,12 +37,12 @@ afterAll(async () => {
 })
 
 describe('generateInviteCode', () => {
-  it('emits the pds-xxxxx-xxxxx shape', () => {
+  it('emits the <hostname>-xxxxx-xxxxx shape', () => {
+    // vitest.setup.ts pins PDS_HOSTNAME to `localhost`, so the prefix is
+    // simply `localhost-`.
     for (let i = 0; i < 20; i++) {
       const code = generateInviteCode()
-      // pds-XXXXX-XXXXX = 4 + 5 + 1 + 5 = 15 characters.
-      expect(code).toMatch(/^pds-[a-z2-7]{5}-[a-z2-7]{5}$/)
-      expect(code).toHaveLength(15)
+      expect(code).toMatch(/^localhost-[a-z2-7]{5}-[a-z2-7]{5}$/)
     }
   })
 

@@ -128,8 +128,13 @@ export async function purgeExpiredEmailTokens(): Promise<void> {
 }
 
 function generateToken(): string {
-  // 20 bytes → 32 chars of lowercase base32, no padding.
-  return base32(randomBytes(20))
+  // bsky.app's reset-password / email-confirm UIs regex-validate the token
+  // as `XXXXX-XXXXX` before submitting (and the same shape is what the
+  // official PDS issues). We match: 8 random bytes → 13 base32 chars,
+  // slice the first 10, split 5+5. ~50 bits of entropy is fine for a
+  // 1-hour single-use token.
+  const raw = base32(randomBytes(8)).slice(0, 10)
+  return `${raw.slice(0, 5)}-${raw.slice(5, 10)}`
 }
 
 async function deleteRow(row: EmailToken): Promise<void> {

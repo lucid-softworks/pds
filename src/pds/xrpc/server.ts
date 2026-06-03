@@ -221,9 +221,13 @@ export async function dispatch(
 
     await validateOutbound(nsid, output)
 
+    // Return `{}` rather than an empty body when the handler resolves to
+    // `undefined` (lexicons without an `output` schema). Some atproto
+    // clients call `response.json()` unconditionally and an empty body
+    // would throw; `{}` parses to a no-op object.
     return respond(
       new Response(
-        output === undefined ? '' : JSON.stringify(output),
+        output === undefined ? '{}' : JSON.stringify(output),
         {
           status: 200,
           headers: {
