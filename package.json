@@ -18,7 +18,9 @@
     "format": "prettier --write \"**/*.{ts,tsx,md,json,css}\"",
     "lint": "eslint . --ext .ts,.tsx",
     "admin:hash": "tsx scripts/admin-hash.ts",
-    "pds-admin": "tsx scripts/pds-admin.ts"
+    "pds-admin": "tsx scripts/pds-admin.ts",
+    "pds:export": "tsx scripts/pds-export.ts",
+    "pds:import": "tsx scripts/pds-import.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.14",

@@ -23,7 +23,7 @@ swapped for production equivalents:
 | Handle wildcards | `alice.test` | `*.<your-domain>` with DNS + TLS cert |
 | Signing keys | Plaintext hex in `accounts.signing_key_priv` | KMS-wrapped or age-encrypted |
 | Email | Logged to console | Transactional provider |
-| Backups | None | Daily Postgres dumps + S3 versioning |
+| Backups | None | `pnpm pds:export` on a schedule, ch. 23 |
 | Observability | `console.log` | Structured logs, metrics, alerts |
 
 We'll take each in turn.
@@ -218,21 +218,18 @@ process; alarm at 800; cap subscriber count or scale out at 1000.
 
 ## Backups
 
-Two things need to survive a complete loss of disk:
+Two things need to survive a complete loss of disk: the Postgres rows
+and the blob bytes. The PDS ships two scripts for this — `pnpm pds:export`
+dumps both into a portable directory, `pnpm pds:import` restores from
+one. [Chapter 23](./23-backups.md) walks the format, the safety rails
+(schema-hash gate, empty-target gate), the topological FK order the
+import follows, and a suggested production cadence.
 
-1. **Postgres.** Daily logical backup (`pg_dump`) plus continuous WAL
-   archive. Restore drill quarterly. Most managed Postgres providers
-   automate this; if you're self-hosting, `barman` or `pgBackRest` is
-   the standard.
-2. **The blob bucket.** `aws s3 sync` to a second bucket in a different
-   region weekly, or rely on S3's cross-region replication. The blobs
-   are content-addressed so partial restores work — a missing blob just
-   means `getBlob` returns 404 for that one CID; the rest of the system
-   keeps working.
-
-You **do not** need to back up `repo_blocks`. The blocks are
-reconstructible from the MST given any commit, *and* they're already in
-Postgres backed up above. Restoring is just bringing Postgres back.
+Pair the export with whatever your Postgres provider gives you (PITR,
+WAL archive, point-in-time snapshots). The script is for portability
+and disaster recovery; provider-native backups are for the
+fifteen-minute-RPO case. Both are cheap; running them in parallel is
+the cheapest insurance you'll buy this year.
 
 ## Observability
 
@@ -313,7 +310,9 @@ firehose drops to other processes on disconnect).
 - [ ] `https://<host>/.well-known/did.json` returns the service DID doc
 - [ ] `curl -sI https://<host>/xrpc/com.atproto.server.describeServer`
       returns 200
-- [ ] Postgres backups configured + restore drill scheduled
+- [ ] Postgres backups configured (`pnpm pds:export` cron + provider
+      WAL archive; see [chapter 23](./23-backups.md)) and quarterly
+      restore drill on the calendar
 - [ ] S3 lifecycle + replication configured
 - [ ] Logs + metrics + alerts flowing
 - [ ] An email-verification flow exists (even if minimal)

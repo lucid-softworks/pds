@@ -48,6 +48,14 @@ and *why* the design is what it is.
 
 - [21 — OAuth](./21-oauth.md)
 
+## Part VIII — A client for our PDS
+
+- [22 — A minimal client UI](./22-client-ui.md)
+
+## Part IX — Operations cookbook
+
+- [23 — Backups](./23-backups.md)
+
 ---
 
 ## Reading order
@@ -63,7 +71,7 @@ Chapters build on each other. If you skip around, the dependency graph is:
                                        ↓
                                        12 → 13 → 14 → 15
                                                         ↓
-                                                        16 → 17 → 18 → 19 → 20 → 21
+                                                        16 → 17 → 18 → 19 → 20 → 21 → 22 → 23
 ```
 
 The hardest cluster is 06–08 (MST, commits, CAR). If you're stuck there, keep
