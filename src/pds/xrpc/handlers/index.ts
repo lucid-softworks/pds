@@ -88,6 +88,10 @@ import * as adminUpdateAccountPassword from './com.atproto.admin.updateAccountPa
 // ozone-shaped moderation surface (chapter 24)
 import * as ozoneEmitEvent from './tools.ozone.moderation.emitEvent'
 import * as ozoneQueryEvents from './tools.ozone.moderation.queryEvents'
+import * as ozoneQueryStatuses from './tools.ozone.moderation.queryStatuses'
+import * as ozoneGetEvent from './tools.ozone.moderation.getEvent'
+// label surface (chapter 24)
+import * as labelQueryLabels from './com.atproto.label.queryLabels'
 // moderation
 import * as createReport from './com.atproto.moderation.createReport'
 // identity (migration-destination)
@@ -167,3 +171,6 @@ export const registry = new HandlerRegistry()
   .register(adminUpdateAccountPassword.nsid, adminUpdateAccountPassword.def)
   .register(ozoneEmitEvent.nsid, ozoneEmitEvent.def)
   .register(ozoneQueryEvents.nsid, ozoneQueryEvents.def)
+  .register(ozoneQueryStatuses.nsid, ozoneQueryStatuses.def)
+  .register(ozoneGetEvent.nsid, ozoneGetEvent.def)
+  .register(labelQueryLabels.nsid, labelQueryLabels.def)
