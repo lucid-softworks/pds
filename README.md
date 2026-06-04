@@ -69,7 +69,7 @@ The docs site is part of the app. Run it locally and read at
 | `tools.ozone.moderation.*` | emitEvent, queryEvents, queryStatuses, getEvent, getRepo, getRecord |
 | OAuth routes | `/oauth/par`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/jwks` |
 | `/.well-known/*` | `did.json`, `oauth-authorization-server` (RFC 8414), `oauth-protected-resource` (RFC 9728) |
-| Operations | `/metrics` (Prometheus), `/admin` (operator UI), `/mod` (moderator UI), `/app` (in-tree client) |
+| Operations | `/metrics` (Prometheus), `/admin` (operator UI), `/mod` (moderator UI), `/app` (in-tree client), `/internal/tls-check` (Caddy on-demand-TLS ask gate) |
 
 The PDS supports the full single-user flow a Bluesky client would put it
 through, plus the operator surface for moderation and migration work.
@@ -96,7 +96,7 @@ through, plus the operator surface for moderation and migration work.
 - ✅ Minimal client UI at `/app` (login, feed, compose, image upload)
 - ✅ Production ergonomics: `KeyWrapper` for at-rest signing keys, structured logger, `/metrics`, graceful shutdown
 - ✅ Backups (`pnpm pds:export` / `pds:import`) + benchmarking (`pds-bench`, `pds-stress`)
-- ✅ Bundled Ozone-shaped moderation: `tools.ozone.moderation.*` XRPC (emitEvent + queryEvents + queryStatuses + getEvent), `com.atproto.label.queryLabels`, `/mod` operator UI, labeler DID-document service entry
+- ✅ Bundled Ozone-shaped moderation: `tools.ozone.moderation.*` XRPC (emitEvent + queryEvents + queryStatuses + getEvent + getRepo + getRecord), `com.atproto.label.queryLabels`, `/mod` operator UI, labeler DID-document service entry + `app.bsky.labeler.service` self-record auto-bootstrapped on team-lead signup, takedown enforcement on `repo.getRecord` / `listRecords` / `sync.getBlob` / `getRecord` / `getRepo` / `getBlocks`
 
 ## Try it
 

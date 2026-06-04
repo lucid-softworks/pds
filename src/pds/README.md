@@ -23,13 +23,14 @@ on React, the router, or the docs UI. Each subdirectory matches a chapter in
 | Admin audit log | [`admin/`](./admin/) | ✅ DAG-CBOR `admin_audit` | [19](../../docs/19-moderation.md) |
 | Account migration | [`account/create.ts`](./account/create.ts) (migrating-in) + migration handlers | ✅ | [20](../../docs/20-migration.md) |
 | OAuth (AS + RS) | [`oauth/`](./oauth/) | ✅ PAR + PKCE + DPoP + JWKS | [21](../../docs/21-oauth.md) |
+| Ozone-shaped moderation | [`mod/`](./mod/) — team, events, requireModerator | ✅ emitEvent + queries + labels surface | [24](../../docs/24-ozone-port.md) |
 
 ## XRPC endpoints
 
 Every XRPC handler lives under [`xrpc/handlers/`](./xrpc/handlers/) as a
 single file named after its NSID. The handler registry (one line per
 endpoint) is in [`xrpc/handlers/index.ts`](./xrpc/handlers/index.ts).
-Currently shipped (39):
+Currently shipped (77):
 
 ```
 ─── com.atproto.server.* ───────────────────────────────────────
