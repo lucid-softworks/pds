@@ -1,9 +1,9 @@
 # How to read this book
 
-This is a long-form, hands-on guide to building a Personal Data Server for the
-AT Protocol — the same protocol that powers Bluesky. By the time you finish,
-you'll have a working PDS in front of you, with every subsystem reimplemented
-from scratch and explained in detail.
+This is a long-form, hands-on guide to building a Personal Data Server *plus*
+a bundled moderation service for the AT Protocol — the same protocol that
+powers Bluesky. By the time you finish, you'll have both reimplemented from
+scratch and explained in detail.
 
 ## What you'll build
 
@@ -19,6 +19,14 @@ A server that:
 - Runs locally in dev with **zero external services** thanks to an
   in-process Postgres compiled to WASM.
 - Deploys to any Postgres-compatible cloud in production.
+- **Bundles its own moderation service.** Unlike Bluesky's setup, where the
+  PDS and Ozone are separate deployments, this project ships both in one
+  repo and one Node process. The operator creates an account on the PDS
+  with handle `mod.<hostname>` and the moderation surface comes alive
+  alongside the rest of the API: `tools.ozone.moderation.*` XRPC, a `/mod`
+  web UI, signed labels published via `com.atproto.label.queryLabels`, and
+  an `#atproto_labeler` service entry in the team-lead's DID document.
+  Chapter 24 walks through the full shape.
 
 ## Who this is for
 
@@ -72,9 +80,14 @@ real reference PDS uses tricks for throughput (LRU caches, prepared-statement
 pools, batched writes, custom CBOR encoders), we use the most obvious
 implementation and explain what we *would* do under load. The protocol shape
 itself is faithful: a Bluesky client should be able to use this PDS without
-patching.
+patching, and an Ozone-shaped client should be able to drive our
+`tools.ozone.moderation.*` surface against the canonical lexicon.
 
-When we diverge from the reference PDS, the chapter calls it out in a
-`> ⚠️ Difference from upstream` block.
+When we diverge from the reference, the chapter calls it out in a
+`> ⚠️ Difference from upstream` block. The largest *intentional* divergence
+is structural: Bluesky ships the PDS (`bluesky-social/pds`) and Ozone
+(`bluesky-social/atproto/packages/ozone`) as separate codebases on
+separate hosts. We bundle them. Chapter 24 explains why and what that
+means for the operator.
 
 Onward to [Chapter 01 — What is a PDS?](./01-what-is-a-pds.md).

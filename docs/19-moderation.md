@@ -49,6 +49,17 @@ gets indexed, what labels appear next to a post, who can see whose
 follows — is downstream. We tell the firehose; downstream consumers
 honor the signal or they don't. That's federation working as designed.
 
+> 📖 **This chapter covers the admin-style takedown surface — the
+> historical first cut at moderation, focused on account-level state.**
+> The richer event-sourced moderation surface (operator events,
+> labels, the labeler DID-document entry, the `/mod` web UI, the
+> `tools.ozone.moderation.*` XRPC) is built on top of this in
+> [chapter 24](./24-ozone-port.md). The two coexist: the admin
+> surface here is the lower layer that the Ozone-shaped surface
+> sits on top of. A takedown emitted via
+> `tools.ozone.moderation.emitEvent` calls the same code path that
+> backs `admin.updateSubjectStatus`.
+
 ## Admin auth: HTTP Basic with a scrypt-hashed password
 
 The admin surface deliberately does *not* use the regular JWT-issuance

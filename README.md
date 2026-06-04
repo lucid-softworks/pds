@@ -1,15 +1,25 @@
-# pds — a teaching port of the Bluesky personal data server
+# pds + mod — a teaching port of the Bluesky PDS *and* Ozone
 
-A from-scratch reimplementation of [bluesky-social/pds][bsky-pds] in
+A from-scratch reimplementation of [bluesky-social/pds][bsky-pds] **plus**
+[bluesky-social/atproto's `packages/ozone`][bsky-ozone], in
 [TanStack Start][tss], paired with a chapter-per-subsystem book that
 explains how every piece works. The goal: someone who reads it end-to-end
-can build their own PDS.
+can build their own PDS *with bundled moderation*.
+
+Unlike Bluesky's setup — where the PDS and Ozone are separate services
+deployed independently — this repo bundles both into a single Node
+process. The operator stands up the PDS, creates an account whose handle
+matches `PDS_MOD_TEAM_HANDLE` (default `mod.<hostname>`), and the
+moderation surface is live on the same host: `tools.ozone.moderation.*`
+XRPC at `/xrpc/`, a `/mod` web UI for moderators, and a labeler service
+entry in the team-lead account's DID document. See chapter 24.
 
 The docs site is part of the app. Run it locally and read at
 `http://localhost:3000/docs`, or read the markdown directly in
 [`docs/`](./docs/README.md).
 
 [bsky-pds]: https://github.com/bluesky-social/pds
+[bsky-ozone]: https://github.com/bluesky-social/atproto/tree/main/packages/ozone
 [tss]: https://tanstack.com/start
 
 ## What's in the box
@@ -38,6 +48,7 @@ The docs site is part of the app. Run it locally and read at
 | OAuth (front half + JWT) | [`src/pds/oauth/`](./src/pds/oauth/) — PAR, authorize, token, revoke, JWKS, DPoP | [21](./docs/21-oauth.md) |
 | Minimal client UI | [`src/routes/app/`](./src/routes/app/) — login, feed, compose, image upload | [22](./docs/22-client-ui.md) |
 | Backups | `pds:export` / `pds:import` CLIs | [23](./docs/23-backups.md) |
+| Ozone-shaped moderation | [`src/pds/mod/`](./src/pds/mod/) + `tools.ozone.moderation.*` + [`src/routes/mod/`](./src/routes/mod/) | [24](./docs/24-ozone-port.md) |
 
 **Implemented XRPC endpoints** (57 + 1 WebSocket subscription):
 
@@ -52,10 +63,13 @@ The docs site is part of the app. Run it locally and read at
 | `com.atproto.repo.*` | createRecord, putRecord, deleteRecord, getRecord, listRecords, applyWrites, describeRepo, uploadBlob, importRepo |
 | `com.atproto.sync.*` (HTTP) | getRepo, getBlocks, getRecord, getLatestCommit, getRepoStatus, listRepos, getBlob, listMissingBlobs |
 | `com.atproto.sync.*` (WS) | subscribeRepos |
-| `com.atproto.admin.*` | getAccountInfo, getAccountInfos, updateAccountStatus, updateAccountHandle, updateAccountEmail, sendEmail, deleteAccount, getAuditLog |
+| `com.atproto.admin.*` | getAccountInfo, getAccountInfos, updateAccountStatus, updateSubjectStatus, getSubjectStatus, updateAccountHandle, updateAccountEmail, updateAccountPassword, sendEmail, deleteAccount, disableAccountInvites, enableAccountInvites, disableInviteCodes, getInviteCodes, getAuditLog |
+| `com.atproto.moderation.*` | createReport |
+| `com.atproto.label.*` | queryLabels (signed labels from the bundled labeler) |
+| `tools.ozone.moderation.*` | emitEvent, queryEvents, queryStatuses, getEvent |
 | OAuth routes | `/oauth/par`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/jwks` |
 | `/.well-known/*` | `did.json`, `oauth-authorization-server` (RFC 8414), `oauth-protected-resource` (RFC 9728) |
-| Operations | `/metrics` (Prometheus), `/admin` (operator UI), `/app` (in-tree client) |
+| Operations | `/metrics` (Prometheus), `/admin` (operator UI), `/mod` (moderator UI), `/app` (in-tree client) |
 
 The PDS supports the full single-user flow a Bluesky client would put it
 through, plus the operator surface for moderation and migration work.
@@ -82,6 +96,7 @@ through, plus the operator surface for moderation and migration work.
 - ✅ Minimal client UI at `/app` (login, feed, compose, image upload)
 - ✅ Production ergonomics: `KeyWrapper` for at-rest signing keys, structured logger, `/metrics`, graceful shutdown
 - ✅ Backups (`pnpm pds:export` / `pds:import`) + benchmarking (`pds-bench`, `pds-stress`)
+- ✅ Bundled Ozone-shaped moderation: `tools.ozone.moderation.*` XRPC (emitEvent + queryEvents + queryStatuses + getEvent), `com.atproto.label.queryLabels`, `/mod` operator UI, labeler DID-document service entry
 
 ## Try it
 
@@ -103,6 +118,7 @@ What's at `http://localhost:3000`:
 - `/docs` — the chapter book that pairs with the code
 - `/app` — minimal in-tree client (login, feed, compose, image upload)
 - `/admin` — operator console (gated by `PDS_ADMIN_HANDLE`)
+- `/mod` — moderator console (gated by membership in `mod_team`; admin Basic also unlocks)
 - `/metrics` — Prometheus exposition (gated by `PDS_METRICS=true`)
 - `/xrpc/*` — the lexicon-defined HTTP surface
 - `/.well-known/did.json` — this PDS's identity document
@@ -139,6 +155,14 @@ password and gets a dashboard for signups and invite codes. The XRPC
 admin surface (`com.atproto.admin.*`) stays HTTP-Basic-gated for
 automation; both paths share the audit log (chapter 19).
 
+For *moderation*, set `PDS_MOD_TEAM_HANDLE` (default `mod.<hostname>`)
+and create that account through the normal signup flow. Its DID
+auto-seeds into `mod_team` as the lead and the account's DID document
+grows an `#atproto_labeler` service entry. Additional moderators can
+be added by hand (`INSERT INTO mod_team` for now; a UI is on the
+list). Visit `/mod` to see the reports queue, drive takedowns, and
+issue labels. Chapter 24 covers the full shape.
+
 ## Database
 
 - **Dev:** [`@electric-sql/pglite`](https://github.com/electric-sql/pglite) — Postgres compiled to WASM, runs in the same process. Zero external services.
@@ -169,13 +193,14 @@ pds/
 │   ├── pds-import.ts              # restore from CAR
 │   ├── pds-bench.ts               # micro-benchmark harness
 │   └── pds-stress.ts              # concurrent-write stress test
-├── drizzle/                       # 0000_init … 0011_admin_audit (12 migrations)
+├── drizzle/                       # 0000_init … 0016_moderation_service (17 migrations)
 ├── src/
 │   ├── routes/                    # TanStack Start routes
 │   │   ├── index.tsx              #   live stats dashboard
 │   │   ├── docs/                  #   the chapter book
 │   │   ├── app/                   #   minimal client UI (login, feed, compose)
 │   │   ├── admin/                 #   handle-gated operator console
+│   │   ├── mod/                   #   moderator console (Ozone-shaped)
 │   │   ├── oauth/                 #   par, authorize, token, revoke, jwks
 │   │   ├── xrpc/                  #   lexicon-defined HTTP surface
 │   │   ├── .well-known/           #   did.json + OAuth metadata
@@ -192,10 +217,12 @@ pds/
 │   │   ├── sequencer/             #   firehose event log writer
 │   │   ├── account/               #   createAccount orchestrator + invites
 │   │   ├── admin/                 #   admin audit log (DAG-CBOR params)
+│   │   ├── mod/                   #   moderation surface (team, events, auth)
 │   │   └── oauth/                 #   PAR, PKCE, DPoP, tokens, JWKS, metadata
 │   ├── lib/
 │   │   ├── db/                    #   schema barrel + factory + migrate runner
 │   │   ├── admin-ui/              #   shared helpers for /admin (auth, csrf, render)
+│   │   ├── mod-ui/                #   shared helpers for /mod (auth, csrf, render)
 │   │   ├── client/                #   client-side bits shared by /app
 │   │   ├── config.ts              #   env loader (PDS_PUBLIC_URL, ...)
 │   │   ├── docs.ts                #   markdown → HTML pipeline
