@@ -23,8 +23,12 @@ import { Route } from '~/routes/xrpc/$nsid'
 
 type Handler = (args: { request: Request; params: { nsid: string } }) => Promise<Response>
 
-const GET: Handler = Route.options.server!.handlers!.GET as Handler
-const POST: Handler = Route.options.server!.handlers!.POST as Handler
+const handlers = Route.options.server!.handlers as unknown as {
+  GET: Handler
+  POST: Handler
+}
+const GET = handlers.GET
+const POST = handlers.POST
 
 function basicAdmin(password = 'admin-pw-test'): string {
   return 'Basic ' + Buffer.from(`admin:${password}`).toString('base64')
@@ -103,5 +107,28 @@ describe('/xrpc/:nsid route shell', () => {
     })
     expect(res.status).toBe(200)
     expect((res.body as { refreshed: boolean }).refreshed).toBe(true)
+  })
+
+  it('bsky-app proxy stubs are registered (return 401 not 404 on un-auth)', async () => {
+    // Each NSID upstream serves via pipethrough — without the stub we'd
+    // 404 with MethodNotImplemented; with it, we 401 on missing auth.
+    const stubs: Array<[string, 'GET' | 'POST']> = [
+      ['app.bsky.actor.getProfile', 'GET'],
+      ['app.bsky.actor.getProfiles', 'GET'],
+      ['app.bsky.feed.getAuthorFeed', 'GET'],
+      ['app.bsky.feed.getTimeline', 'GET'],
+      ['app.bsky.feed.getActorLikes', 'GET'],
+      ['app.bsky.feed.getPostThread', 'GET'],
+      ['app.bsky.feed.getFeed', 'GET'],
+      ['app.bsky.notification.registerPush', 'POST'],
+    ]
+    for (const [nsid, method] of stubs) {
+      const res = await call(
+        method === 'GET' ? GET : POST,
+        nsid,
+        method === 'POST' ? { body: {} } : {},
+      )
+      expect(res.status, `${nsid} should reject un-auth before routing`).toBe(401)
+    }
   })
 })

@@ -295,14 +295,17 @@ describe('tools.ozone.queue.* + tools.ozone.report.*', () => {
     clearModTeamCache()
     // Ensure the lead exists so requireModerator's team check works
     // against a non-empty roster. The lead handle is `mod.test`.
-    let lead = await getModTeamLead().catch(() => null)
-    if (!lead) {
+    let leadDid: string
+    const existing = await getModTeamLead().catch(() => null)
+    if (existing) {
+      leadDid = existing.did
+    } else {
       const leadAccount = await createAccount({
         handle: 'mod.test',
         email: `mod-bearer-${Date.now()}@example.test`,
         password: 'lead-password',
       })
-      lead = { did: leadAccount.did, role: 'lead' }
+      leadDid = leadAccount.did
       await getModTeamLead() // triggers lazy seed
     }
 
@@ -312,7 +315,7 @@ describe('tools.ozone.queue.* + tools.ozone.report.*', () => {
       email: `bearer-${Date.now()}@example.test`,
       password: 'mod-password',
     })
-    await addModerator({ did: modAccount.did, role: 'moderator', addedBy: lead.did })
+    await addModerator({ did: modAccount.did, role: 'moderator', addedBy: leadDid })
     const { accessJwt } = await createSessionTokens(modAccount.did)
 
     // Gated read: listQueues

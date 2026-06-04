@@ -194,7 +194,14 @@ export async function proxyForward(args: {
 
 /** Orchestrator. The XRPC dispatcher calls this when the request carries
  *  an `Atproto-Proxy` header AND the NSID isn't local. Returns the proxy
- *  response, or throws an XrpcError the dispatcher turns into JSON. */
+ *  response, or throws an XrpcError the dispatcher turns into JSON.
+ *
+ *  `defaultTarget` is for the bsky-specific stub handlers that wrap
+ *  this surface for known-AppView NSIDs (getTimeline et al). When set,
+ *  a missing `Atproto-Proxy` header doesn't 400 — instead the call
+ *  forwards to the supplied default (`did:...#<service-id>`). This
+ *  matches the upstream PDS's behavior of serving those endpoints
+ *  with a hard-coded AppView target. */
 export async function dispatchViaProxy(args: {
   nsid: string
   request: Request
@@ -203,8 +210,10 @@ export async function dispatchViaProxy(args: {
    *  have to. The DID is the only thing we need to look up the signing
    *  key. */
   callerDid: string
+  defaultTarget?: string
 }): Promise<Response> {
-  const headerValue = args.request.headers.get('atproto-proxy')
+  const headerValue =
+    args.request.headers.get('atproto-proxy') ?? args.defaultTarget ?? null
   if (!headerValue) {
     // Shouldn't happen if the dispatcher routed us here — defensive.
     throw BadRequest('atproto-proxy header missing', 'InvalidRequest')

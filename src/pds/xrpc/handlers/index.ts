@@ -68,6 +68,18 @@ import * as requestAccountMigrate from './com.atproto.server.requestAccountMigra
 // bsky-app preferences (PDS-served despite the app.bsky.* namespace)
 import * as bskyGetPreferences from './app.bsky.actor.getPreferences'
 import * as bskyPutPreferences from './app.bsky.actor.putPreferences'
+// bsky-app proxy stubs — forward to api.bsky.app when no Atproto-Proxy
+// header is set, with read-after-write munges applied inside the
+// proxy path. Matches the upstream PDS's behavior of serving these
+// endpoints with a hard-coded AppView target.
+import * as bskyGetProfile from './app.bsky.actor.getProfile'
+import * as bskyGetProfiles from './app.bsky.actor.getProfiles'
+import * as bskyGetAuthorFeed from './app.bsky.feed.getAuthorFeed'
+import * as bskyGetTimeline from './app.bsky.feed.getTimeline'
+import * as bskyGetActorLikes from './app.bsky.feed.getActorLikes'
+import * as bskyGetPostThread from './app.bsky.feed.getPostThread'
+import * as bskyGetFeed from './app.bsky.feed.getFeed'
+import * as bskyRegisterPush from './app.bsky.notification.registerPush'
 // admin
 import * as adminGetAccountInfo from './com.atproto.admin.getAccountInfo'
 import * as adminGetAccountInfos from './com.atproto.admin.getAccountInfos'
@@ -215,6 +227,14 @@ export const registry = new HandlerRegistry()
   .register(requestAccountMigrate.nsid, requestAccountMigrate.def)
   .register(bskyGetPreferences.nsid, bskyGetPreferences.def)
   .register(bskyPutPreferences.nsid, bskyPutPreferences.def)
+  .register(bskyGetProfile.nsid, bskyGetProfile.def)
+  .register(bskyGetProfiles.nsid, bskyGetProfiles.def)
+  .register(bskyGetAuthorFeed.nsid, bskyGetAuthorFeed.def)
+  .register(bskyGetTimeline.nsid, bskyGetTimeline.def)
+  .register(bskyGetActorLikes.nsid, bskyGetActorLikes.def)
+  .register(bskyGetPostThread.nsid, bskyGetPostThread.def)
+  .register(bskyGetFeed.nsid, bskyGetFeed.def)
+  .register(bskyRegisterPush.nsid, bskyRegisterPush.def)
   .register(adminGetAccountInfo.nsid, adminGetAccountInfo.def)
   .register(adminGetAccountInfos.nsid, adminGetAccountInfos.def)
   .register(adminUpdateAccountStatus.nsid, adminUpdateAccountStatus.def)
