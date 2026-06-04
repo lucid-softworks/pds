@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
 import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as AppRouteRouteImport } from './routes/app/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -30,6 +31,11 @@ import { Route as AdminLoginRouteImport } from './routes/admin/login'
 import { Route as AdminInvitesRouteImport } from './routes/admin/invites'
 import { Route as Char91DotwellKnownChar93FileRouteImport } from './routes/[.well-known]/$file'
 
+const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
+  id: '/robots.txt',
+  path: '/robots.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MetricsRoute = MetricsRouteImport.update({
   id: '/metrics',
   path: '/metrics',
@@ -136,6 +142,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteRouteWithChildren
   '/metrics': typeof MetricsRoute
+  '/robots.txt': typeof RobotsDottxtRoute
   '/.well-known/$file': typeof Char91DotwellKnownChar93FileRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/login': typeof AdminLoginRoute
@@ -157,6 +164,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/metrics': typeof MetricsRoute
+  '/robots.txt': typeof RobotsDottxtRoute
   '/.well-known/$file': typeof Char91DotwellKnownChar93FileRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/login': typeof AdminLoginRoute
@@ -180,6 +188,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/app': typeof AppRouteRouteWithChildren
   '/metrics': typeof MetricsRoute
+  '/robots.txt': typeof RobotsDottxtRoute
   '/.well-known/$file': typeof Char91DotwellKnownChar93FileRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/login': typeof AdminLoginRoute
@@ -204,6 +213,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/metrics'
+    | '/robots.txt'
     | '/.well-known/$file'
     | '/admin/invites'
     | '/admin/login'
@@ -225,6 +235,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/metrics'
+    | '/robots.txt'
     | '/.well-known/$file'
     | '/admin/invites'
     | '/admin/login'
@@ -247,6 +258,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/metrics'
+    | '/robots.txt'
     | '/.well-known/$file'
     | '/admin/invites'
     | '/admin/login'
@@ -270,6 +282,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRouteRoute: typeof AppRouteRouteWithChildren
   MetricsRoute: typeof MetricsRoute
+  RobotsDottxtRoute: typeof RobotsDottxtRoute
   Char91DotwellKnownChar93FileRoute: typeof Char91DotwellKnownChar93FileRoute
   AdminInvitesRoute: typeof AdminInvitesRoute
   AdminLoginRoute: typeof AdminLoginRoute
@@ -288,6 +301,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/robots.txt': {
+      id: '/robots.txt'
+      path: '/robots.txt'
+      fullPath: '/robots.txt'
+      preLoaderRoute: typeof RobotsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/metrics': {
       id: '/metrics'
       path: '/metrics'
@@ -451,6 +471,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRouteRoute: AppRouteRouteWithChildren,
   MetricsRoute: MetricsRoute,
+  RobotsDottxtRoute: RobotsDottxtRoute,
   Char91DotwellKnownChar93FileRoute: Char91DotwellKnownChar93FileRoute,
   AdminInvitesRoute: AdminInvitesRoute,
   AdminLoginRoute: AdminLoginRoute,

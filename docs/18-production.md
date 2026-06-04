@@ -331,6 +331,32 @@ the proxy layer. The teaching port intentionally omits in-process auth
 because every realistic deployment fronts the PDS with Caddy / nginx /
 an LB anyway and that's the right authority for scrape ACLs.
 
+### Health check (`GET /xrpc/_health`)
+
+Reference parity: the upstream Bluesky PDS exposes a single combined
+liveness + readiness probe at `/xrpc/_health`. We match that exactly —
+the route handler runs `SELECT 1` against Postgres and returns:
+
+```json
+200 { "version": "<git sha or PDS_VERSION>" }
+503 { "version": "<...>", "error": "Service Unavailable" }
+```
+
+The version string resolves from `PDS_VERSION` if set, else `git rev-parse
+HEAD` from the working tree (our deploy.sh leaves `.git` in place), else
+`package.json`'s `version`. See `src/lib/version.ts`.
+
+Wire your load balancer or systemd `ExecHealthCheck` at this URL. There
+is intentionally **no** separate `/health` or `/readyz` — that's a
+Kubernetes convention the reference PDS doesn't follow, and the
+combined check is sufficient: a process whose DB is gone is not
+healthy in any useful sense.
+
+### `robots.txt`
+
+A permissive `Allow: /` is served at `/robots.txt`, matching the
+reference. The PDS hosts a public API and we want crawlers to index it.
+
 ### Graceful shutdown (`src/lib/shutdown.ts`)
 
 Subsystems register teardowns with `onShutdown(name, fn)`. On SIGTERM /
