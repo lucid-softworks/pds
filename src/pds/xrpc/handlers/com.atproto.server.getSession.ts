@@ -29,6 +29,7 @@ const handler: Handler = async ({ authorization, dpopProof, request }) => {
       did: accounts.did,
       handle: accounts.handle,
       email: accounts.email,
+      emailConfirmedAt: accounts.emailConfirmedAt,
       status: accounts.status,
       signingKeyPub: accounts.signingKeyPub,
     })
@@ -46,7 +47,7 @@ const handler: Handler = async ({ authorization, dpopProof, request }) => {
     did: acct.did,
     handle: acct.handle,
     email: acct.email,
-    emailConfirmed: true,
+    emailConfirmed: acct.emailConfirmedAt != null,
     didDoc,
     active: acct.status === 'active',
   }

@@ -44,7 +44,7 @@ const handler: Handler = async ({ input }) => {
     did: account.did,
     handle: account.handle,
     email: account.email,
-    emailConfirmed: true,
+    emailConfirmed: account.emailConfirmedAt != null,
     accessJwt: tokens.accessJwt,
     refreshJwt: tokens.refreshJwt,
     didDoc,
