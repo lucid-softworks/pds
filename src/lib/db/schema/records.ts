@@ -31,6 +31,12 @@ export const records = pgTable(
     indexedAt: timestamp('indexed_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    // Operator-supplied identifier set by `admin.updateSubjectStatus`
+    // when the record is taken down. NULL on visible records. The
+    // record body stays in the repo (the MST commit doesn't rewind);
+    // we only stop serving it from `repo.getRecord` and friends. See
+    // chapter 19 — Moderation.
+    takedownRef: text('takedown_ref'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.repoDid, t.collection, t.rkey] }),

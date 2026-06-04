@@ -76,6 +76,20 @@ Our sync endpoints are that somewhere. A backfilling relay does roughly:
 5. open the firehose, start tailing from the sequence number we now know
 ```
 
+Two more endpoints ride this rail when the consumer wants a narrower
+inventory than the full CAR:
+
+- `com.atproto.sync.listBlobs?did=<did>&limit=&cursor=` — paginated
+  enumeration of every blob CID a repo has uploaded. Used by a backup
+  tool checking blob coverage, or by a migration's destination PDS
+  inventorying what the source actually still has. Same status-name
+  discipline as `getLatestCommit`: takendown / deactivated accounts
+  surface the matching lexicon error rather than a generic 404.
+- `com.atproto.sync.getLatestCommit?did=<did>` — `{cid, rev}` pointer
+  read so a consumer with a cached rev can decide "fetch nothing,
+  fetch delta via getBlocks, or full re-pull via getRepo" without
+  paying for the CAR every time. Auth-free; the response is a few bytes.
+
 Steps 1 and 2 are tiny; step 3 is where the bytes are. The relay walks
 the response with our streaming `decodeCar`, verifies each block as it
 arrives, and inserts blocks into its own (much larger) block store keyed

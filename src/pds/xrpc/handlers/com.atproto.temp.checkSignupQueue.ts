@@ -1,6 +1,6 @@
-// XRPC handler: com.atproto.server.checkSignupQueue
+// XRPC handler: com.atproto.temp.checkSignupQueue
 //
-// Lexicon: https://github.com/bluesky-social/atproto/blob/main/lexicons/com/atproto/server/checkSignupQueue.json
+// Lexicon: https://github.com/bluesky-social/atproto/blob/main/lexicons/com/atproto/temp/checkSignupQueue.json
 //
 // Upstream Bluesky.app uses this for a soft launch / waiting-list flow. A
 // self-hosted PDS has no queue, so we return "you're activated, no wait" for
@@ -15,4 +15,4 @@ const handler: Handler = async () => ({
 })
 
 export const def: HandlerDef = { method: 'GET', handler }
-export const nsid = 'com.atproto.server.checkSignupQueue'
+export const nsid = 'com.atproto.temp.checkSignupQueue'

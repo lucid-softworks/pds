@@ -3,6 +3,7 @@ import {
   text,
   integer,
   bigint,
+  boolean,
   timestamp,
   primaryKey,
   index,
@@ -44,6 +45,11 @@ export const accounts = pgTable(
     // confirmEmail, cleared by updateEmail so the new address is reconfirmed.
     // See chapter 13 — Authentication.
     emailConfirmedAt: timestamp('email_confirmed_at', { withTimezone: true }),
+    // Operator-driven flag: when true, this account cannot mint new invite
+    // codes via createInviteCode(s). Existing codes already minted by them
+    // are unaffected; revoke those individually via admin.disableInviteCodes.
+    // See chapter 19 — Moderation (invite governance).
+    invitesDisabled: boolean('invites_disabled').default(false).notNull(),
     // 'none' | 'migrating-out' | 'migrating-in'. Tracks where the account is
     // in a cross-PDS move so the firehose can distinguish a migration commit
     // from an ordinary one. See chapter 20 — Migration.

@@ -40,8 +40,13 @@ export type AuditAction =
   | 'updateAccountStatus'
   | 'updateAccountHandle'
   | 'updateAccountEmail'
+  | 'updateAccountPassword'
   | 'sendEmail'
   | 'deleteAccount'
+  | 'disableAccountInvites'
+  | 'enableAccountInvites'
+  | 'disableInviteCodes'
+  | 'updateSubjectStatus'
 
 export type AuditResult = 'ok' | 'error'
 
@@ -213,6 +218,11 @@ export function withAdminAudit(
       input: unknown,
       params: Record<string, string>,
     ) => string | undefined
+    /** Optional pre-audit transform of the snapshot. Use this to redact
+     *  secrets (e.g. plaintext passwords) so they never reach the audit
+     *  table. Receives the raw `input` (or `params` if no body); whatever
+     *  you return is what gets DAG-CBOR-encoded into `params`. */
+    redactSnapshot?: (input: unknown, params: Record<string, string>) => unknown
   },
   body: Handler,
 ): Handler {
@@ -221,8 +231,12 @@ export function withAdminAudit(
     // Snapshot exactly what reached the handler. For POSTs that's the
     // parsed JSON body; for GETs (none of the mutation surface today, but
     // the wrapper is shape-agnostic) it's the query string.
-    const snapshot =
+    const rawSnapshot =
       ctx.input !== undefined && ctx.input !== null ? ctx.input : ctx.params
+    const snapshot =
+      args.redactSnapshot !== undefined
+        ? args.redactSnapshot(ctx.input, ctx.params)
+        : rawSnapshot
     const targetDid = args.targetDidFrom(ctx.input, ctx.params)
     try {
       const output = await body(ctx)

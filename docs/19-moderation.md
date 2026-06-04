@@ -315,16 +315,127 @@ Why the soft delete? Same reasoning as the user-side path in chapter 13:
   flow on top of the existing row by flipping status back, if you trust
   the operator with that lever.
 
+## Invite governance: `disableAccountInvites` / `enableAccountInvites` / `disableInviteCodes` / `getInviteCodes`
+
+Four endpoints control who gets to mint invites and which invites are
+honoured at signup. The first two operate on accounts; the third
+operates on codes; the fourth is the operator's read window.
+
+- **`admin.disableAccountInvites`** — flips `accounts.invites_disabled`
+  to `true`. The flag gates any *user-facing* invite-minting path; our
+  `createInviteCode(s)` handlers are admin-only today, so the flag is
+  decorative until chapter 12's "user mints their own invites"
+  exercise wires it up. Body: `{ account: <did>, note?: string }`.
+  Audit row carries the note for the trail.
+- **`admin.enableAccountInvites`** — inverse. Clears
+  `invites_disabled`. Same body.
+- **`admin.disableInviteCodes`** — burn specific codes. Body:
+  `{ codes?: [string], accounts?: [did] }`. Unioned: every code in
+  `codes` *plus* every code minted by any DID in `accounts` flips
+  `disabled` to `true` and stamps `disabled_at`. At least one array
+  must be non-empty; passing `"admin"` in `accounts` is refused (you'd
+  brick your own operator-minted invites).
+- **`admin.getInviteCodes`** — paginated read. Query: `?sort=recent|usage&limit=&cursor=`.
+  Output uses the lexicon's `defs#inviteCode` shape: `{ code,
+  available, disabled, forAccount, createdBy, createdAt, uses: [{
+  usedBy, usedAt }] }`. We don't paginate `uses` per code — heavily-
+  redeemed codes inflate the page slightly but the cap is rare in
+  practice. Sort by `recent` (created_at desc) or `usage` (uses_total
+  desc); the cursor encodes the tiebreaker so a tied-pair page never
+  returns the same row twice.
+
+Schema additions (`drizzle/0014_invite_governance.sql`):
+
+```
+accounts.invites_disabled  boolean NOT NULL DEFAULT false
+invite_codes.disabled_at   timestamptz   -- NULL on never-disabled rows
+```
+
+The existing `invite_codes.disabled` boolean already shipped in
+chapter 12; the new `disabled_at` is the audit pair so operators can
+tell *when* a code went dark, not just that it did.
+
+## Subject-level moderation: `updateSubjectStatus` / `getSubjectStatus`
+
+Where `updateAccountStatus` (above) operates on a whole account, this
+pair dispatches by `subject.$type`:
+
+| `$type`                                  | What gets flipped |
+| ---------------------------------------- | ------------------ |
+| `com.atproto.admin.defs#repoRef`         | `accounts.status` (delegates to the same logic as `updateAccountStatus`) |
+| `com.atproto.repo.strongRef`             | `records.takedown_ref` for the (repo, collection, rkey) the URI points at |
+| `com.atproto.admin.defs#repoBlobRef`     | `blobs.takedown_ref` for the (creator, cid) pair |
+
+`takedown.applied: true` writes the operator-supplied `takedown.ref`
+into the `takedown_ref` column — a free-form string the operator uses
+to link back to a ticket, court order, or moderation case. The
+reference defaults `ref` to `"1"` when omitted; we follow suit so the
+column is non-NULL exactly when the takedown is in force.
+`takedown.applied: false` clears the ref to NULL. `deactivated` (the
+other half of the input) is honoured only for `repoRef` subjects —
+flipping a single record into "deactivated" doesn't have a meaning.
+
+Schema (`drizzle/0015_subject_takedown.sql`):
+
+```
+records.takedown_ref  text   -- NULL on visible rows
+blobs.takedown_ref    text   -- NULL on visible rows
+```
+
+We intentionally don't store an `applied` boolean alongside — presence
+of a ref *is* the takedown signal, and the audit log carries the
+timing. The record / blob bytes stay on disk (the MST commit doesn't
+rewind for a takedown; that would invalidate every later commit's
+prev chain). We only stop *serving* them — the read endpoints
+(`repo.getRecord`, `sync.getBlob`) will need a one-line check on the
+ref column as the takedown surface gets wired. That follow-up is on
+the punch list for chapter 19's next pass.
+
+`getSubjectStatus` is the read side. Three query shapes:
+
+```
+?did=did:plc:...                          → account-level
+?did=did:plc:...&blob=bafy...             → blob-level
+?uri=at://did:plc:.../<col>/<rkey>        → record-level
+```
+
+The response includes `takedown` (and `deactivated`, for accounts) only
+when the corresponding state is in force; omitted otherwise, matching
+the reference.
+
+## Force-set a password: `updateAccountPassword`
+
+Operator override for the password-reset flow. Useful when an emergency
+lockout (compromised credentials, employee-managed account) means the
+user can't run the reset themselves. Body: `{ did, password }`. The
+password goes through the same scrypt KDF as the user-driven reset
+(`src/pds/auth/password.ts`), so storage is byte-identical to a
+normal reset.
+
+This does *not* invalidate existing sessions on its own. Refresh
+tokens stay valid; an attacker who already has them keeps access until
+the rotation TTL expires. The documented "evict the user" recipe is
+`updateAccountPassword` followed by `updateAccountStatus(status:
+'takendown')` — the takedown gate stops every authenticated handler
+in its tracks.
+
+The audit wrapper redacts the password before persisting (the audit
+row carries `password: '<redacted>'` instead of the plaintext). Don't
+remove the redaction.
+
 ## Audit log
 
 Every admin **mutation** writes one row to `admin_audit` — successful or
-not. The five verbs in scope:
+not. The verbs in scope:
 
 - `updateAccountStatus`
 - `updateAccountHandle`
 - `updateAccountEmail`
+- `updateAccountPassword`
 - `sendEmail`
 - `deleteAccount`
+- `disableAccountInvites` / `enableAccountInvites` / `disableInviteCodes`
+- `updateSubjectStatus`
 
 The two read verbs (`getAccountInfo`, `getAccountInfos`) deliberately
 do **not** write. They fire on every console refresh; if we logged

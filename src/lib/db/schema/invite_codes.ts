@@ -35,6 +35,10 @@ export const inviteCodes = pgTable(
     usesRemaining: integer('uses_remaining').default(1).notNull(),
     usesTotal: integer('uses_total').default(0).notNull(),
     disabled: boolean('disabled').default(false).notNull(),
+    // Set the moment `disabled` flips to true (whether by admin action or
+    // by the code being individually burned). NULL on never-disabled codes.
+    // Used by admin.getInviteCodes for the "recently disabled" sort path.
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

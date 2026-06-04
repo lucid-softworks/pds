@@ -33,7 +33,7 @@ import * as deleteAccount from './com.atproto.server.deleteAccount'
 import * as createInviteCode from './com.atproto.server.createInviteCode'
 import * as createInviteCodes from './com.atproto.server.createInviteCodes'
 import * as getAccountInviteCodes from './com.atproto.server.getAccountInviteCodes'
-import * as checkSignupQueue from './com.atproto.server.checkSignupQueue'
+import * as checkSignupQueue from './com.atproto.temp.checkSignupQueue'
 // identity
 import * as resolveHandle from './com.atproto.identity.resolveHandle'
 import * as updateHandle from './com.atproto.identity.updateHandle'
@@ -56,6 +56,7 @@ import * as syncGetRecord from './com.atproto.sync.getRecord'
 import * as getRepo from './com.atproto.sync.getRepo'
 import * as getRepoStatus from './com.atproto.sync.getRepoStatus'
 import * as listRepos from './com.atproto.sync.listRepos'
+import * as listBlobs from './com.atproto.sync.listBlobs'
 import * as subscribeRepos from './com.atproto.sync.subscribeRepos'
 // migration
 import * as getServiceAuth from './com.atproto.server.getServiceAuth'
@@ -75,6 +76,15 @@ import * as adminUpdateAccountEmail from './com.atproto.admin.updateAccountEmail
 import * as adminSendEmail from './com.atproto.admin.sendEmail'
 import * as adminDeleteAccount from './com.atproto.admin.deleteAccount'
 import * as adminGetAuditLog from './com.atproto.admin.getAuditLog'
+// admin: invite governance
+import * as adminDisableAccountInvites from './com.atproto.admin.disableAccountInvites'
+import * as adminEnableAccountInvites from './com.atproto.admin.enableAccountInvites'
+import * as adminDisableInviteCodes from './com.atproto.admin.disableInviteCodes'
+import * as adminGetInviteCodes from './com.atproto.admin.getInviteCodes'
+// admin: subject-level moderation + password reset
+import * as adminUpdateSubjectStatus from './com.atproto.admin.updateSubjectStatus'
+import * as adminGetSubjectStatus from './com.atproto.admin.getSubjectStatus'
+import * as adminUpdateAccountPassword from './com.atproto.admin.updateAccountPassword'
 // moderation
 import * as createReport from './com.atproto.moderation.createReport'
 // identity (migration-destination)
@@ -125,6 +135,7 @@ export const registry = new HandlerRegistry()
   .register(getRepo.nsid, getRepo.def)
   .register(getRepoStatus.nsid, getRepoStatus.def)
   .register(listRepos.nsid, listRepos.def)
+  .register(listBlobs.nsid, listBlobs.def)
   .register(subscribeRepos.nsid, subscribeRepos.def)
   .register(getServiceAuth.nsid, getServiceAuth.def)
   .register(reserveSigningKey.nsid, reserveSigningKey.def)
@@ -144,3 +155,10 @@ export const registry = new HandlerRegistry()
   .register(createReport.nsid, createReport.def)
   .register(getRecommendedDidCredentials.nsid, getRecommendedDidCredentials.def)
   .register(submitPlcOperation.nsid, submitPlcOperation.def)
+  .register(adminDisableAccountInvites.nsid, adminDisableAccountInvites.def)
+  .register(adminEnableAccountInvites.nsid, adminEnableAccountInvites.def)
+  .register(adminDisableInviteCodes.nsid, adminDisableInviteCodes.def)
+  .register(adminGetInviteCodes.nsid, adminGetInviteCodes.def)
+  .register(adminUpdateSubjectStatus.nsid, adminUpdateSubjectStatus.def)
+  .register(adminGetSubjectStatus.nsid, adminGetSubjectStatus.def)
+  .register(adminUpdateAccountPassword.nsid, adminUpdateAccountPassword.def)

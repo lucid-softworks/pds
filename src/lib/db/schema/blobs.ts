@@ -35,6 +35,11 @@ export const blobs = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    // Operator-supplied identifier set by `admin.updateSubjectStatus`
+    // when the blob is taken down. NULL on visible blobs; non-NULL means
+    // the blob's bytes are still on disk but no longer served. See
+    // chapter 19 — Moderation.
+    takedownRef: text('takedown_ref'),
   },
   (t) => ({
     creatorIdx: index('blobs_creator_idx').on(t.creator),
