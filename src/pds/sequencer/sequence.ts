@@ -22,7 +22,7 @@
 //
 // See chapter 16 — Event sequencer and the firehose.
 
-import { eq, gt, desc, asc } from 'drizzle-orm'
+import { eq, gt, lt, desc, asc } from 'drizzle-orm'
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core'
 import { db } from '~/lib/db'
 // Imported directly because the coordinator wires the barrel re-export at
@@ -181,6 +181,34 @@ export async function latestSeq(): Promise<number> {
     .orderBy(desc(repoSeq.seq))
     .limit(1)
   return row[0]?.seq ?? 0
+}
+
+/** Smallest seq currently retained. Used by `streamFirehose` to decide
+ *  whether a subscriber's cursor is older than what we can replay — if
+ *  so, the lexicon defines an `#info { name: 'OutdatedCursor' }` frame
+ *  followed by a close (instead of silently replaying from the start
+ *  of what's left, which would confuse a consumer expecting strict
+ *  continuity). */
+export async function oldestSeq(): Promise<number | null> {
+  const row = await pg
+    .select({ seq: repoSeq.seq })
+    .from(repoSeq)
+    .orderBy(asc(repoSeq.seq))
+    .limit(1)
+  return row[0]?.seq ?? null
+}
+
+/** Garbage-collect repo_seq rows older than the configured retention
+ *  window. Returns the number of rows deleted so the caller can log
+ *  it. No-op when retention is null (the default — keep forever). */
+export async function gcRepoSeq(retentionDays: number | null): Promise<number> {
+  if (retentionDays === null || retentionDays <= 0) return 0
+  const cutoff = new Date(Date.now() - retentionDays * 86_400_000)
+  const result = await pg
+    .delete(repoSeq)
+    .where(lt(repoSeq.sequencedAt, cutoff))
+    .returning({ seq: repoSeq.seq })
+  return result.length
 }
 
 /** Mark an event as invalidated. Rare — only used when a previously-emitted

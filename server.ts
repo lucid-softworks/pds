@@ -31,6 +31,10 @@ import { onShutdown } from './src/lib/shutdown'
 import type { FirehoseClient } from './src/pds/sequencer/firehose'
 import { streamFirehose } from './src/pds/sequencer/firehose'
 import { streamLabels } from './src/pds/labels/subscribe'
+import {
+  startRetentionSweeps,
+  stopRetentionSweeps,
+} from './src/pds/sequencer/retention'
 
 // We always start from the project root (the dev `tsx server.ts` command
 // and the systemd unit both Cwd at the repo root). Using `process.cwd()`
@@ -252,6 +256,10 @@ onShutdown('db', async () => {
   await closeDb()
 })
 
+startRetentionSweeps()
+onShutdown('firehose-retention', async () => {
+  stopRetentionSweeps()
+})
 onShutdown('http', async () => {
   await server.close()
 })

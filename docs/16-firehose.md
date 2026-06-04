@@ -222,9 +222,14 @@ That's the entire wire format. The structured payloads underneath are:
   doc swap, anything that should cause a re-resolve.
 - **`#account`** — `{ seq, did, time, active, status? }`. Account state
   change (takendown, deactivated, deleted, suspended).
-- **`#info`** — `{ name, message }`. Out-of-band notes from the server,
-  e.g. `OutdatedCursor`. No `seq`. 🚧 not yet emitted by our impl.
-- **`#sync`** — full repo re-sync hint. Rare; we don't emit it yet.
+- **`#info`** — `{ name, message }`. Out-of-band notes from the server.
+  Today we emit one variant: `OutdatedCursor` when a subscriber's
+  cursor is older than the oldest row left in `repo_seq` (only fires
+  when `PDS_FIREHOSE_RETENTION_DAYS` is configured and the sweeper
+  has trimmed history).
+- **`#sync`** — full repo re-sync hint. Rare; we don't emit it yet —
+  we never compact or rewind the commit log, so the case never
+  arises in our codebase.
 - **`#tombstone`** — `{ seq, did, time }`. Account fully deleted.
 
 ## Cursor semantics
@@ -236,7 +241,7 @@ replays from the very first row. Three outcomes:
 | --- | --- |
 | `cursor ≤ latestSeq` | Replay history, then tail. The happy path. |
 | `cursor > latestSeq` | One `op: -1, error: "FutureCursor"` frame, then close. |
-| Cursor older than what's still in `repo_seq` | 🚧 `op: 1, t: "#info", { name: "OutdatedCursor" }`, then close. Not implemented yet — we don't have retention. |
+| Cursor older than what's still in `repo_seq` | One `op: 1, t: "#info", { name: "OutdatedCursor" }` frame, then close. Triggered when `PDS_FIREHOSE_RETENTION_DAYS` is set and the hourly GC sweep (`src/pds/sequencer/retention.ts`) has trimmed history below the requested cursor. |
 
 A well-behaved client persists the seq of the last event it processed and
 reconnects with `cursor=<that-seq>`. Because `seq` is the source of truth

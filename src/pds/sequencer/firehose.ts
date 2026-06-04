@@ -11,7 +11,7 @@
 // See chapter 16 — Event sequencer and the firehose.
 
 import { encode } from '~/pds/codec'
-import { latestSeq, readEventsSince } from './sequence'
+import { latestSeq, oldestSeq, readEventsSince } from './sequence'
 
 /** Minimal interface the streaming loop needs from a transport. The route
  *  glues this to whatever WebSocket library it has. */
@@ -63,6 +63,26 @@ export async function streamFirehose(opts: StreamOptions): Promise<void> {
     await sendError(client, 'FutureCursor', `cursor ${cursor} > latest ${head}`)
     client.close(1008, 'FutureCursor')
     return
+  }
+
+  // OutdatedCursor: when `PDS_FIREHOSE_RETENTION_DAYS` is on and the
+  // sweeper has trimmed history below the caller's cursor, we can no
+  // longer replay strict-continuity from there. The lexicon defines
+  // an `#info { name: 'OutdatedCursor' }` info-frame for exactly this
+  // case — emit it and close, instead of silently dropping rows. The
+  // consumer is expected to re-bootstrap (e.g. `getRepo` + restart
+  // tailing from current head).
+  if (cursor > 0) {
+    const oldest = await oldestSeq()
+    if (oldest !== null && cursor < oldest) {
+      await sendInfo(
+        client,
+        'OutdatedCursor',
+        `cursor ${cursor} < oldest retained ${oldest}`,
+      )
+      client.close(1008, 'OutdatedCursor')
+      return
+    }
   }
 
   // Replay phase — drain history in `batchSize` chunks. We loop until a
@@ -136,6 +156,21 @@ async function sendError(
   // spec only requires the single CBOR object. Sending just the header
   // matches what the upstream PDS does.
   await client.send(header.bytes)
+}
+
+/** Build and send a `#info` frame. Lexicon-defined names today:
+ *  `OutdatedCursor` — the cursor predates our retained history. */
+async function sendInfo(
+  client: FirehoseClient,
+  name: string,
+  message: string,
+): Promise<void> {
+  const header = await encode({ op: 1, t: '#info' })
+  const body = await encode({ name, message })
+  const frame = new Uint8Array(header.bytes.length + body.bytes.length)
+  frame.set(header.bytes, 0)
+  frame.set(body.bytes, header.bytes.length)
+  await client.send(frame)
 }
 
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {

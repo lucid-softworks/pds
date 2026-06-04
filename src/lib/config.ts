@@ -49,6 +49,13 @@ export type PdsConfig = {
    *  account through the regular session flow; /admin then checks the
    *  current handle matches this env value. See chapter 19. */
   adminHandle: string | null
+  /** Days of `repo_seq` history retained. Null (default) means keep
+   *  forever — the table grows without bound. Set to a positive
+   *  integer (e.g. 14) to enable a background sweep that deletes
+   *  events older than the cutoff. Subscribers asking for a cursor
+   *  older than the oldest remaining row get an `#info OutdatedCursor`
+   *  frame followed by a 1008 close, per the subscribeRepos lexicon. */
+  firehoseRetentionDays: number | null
   /** Handle of the moderation-team lead account. Defaults to `mod.<hostname>`.
    *  At startup we resolve the handle to a DID and seed `mod_team` if not
    *  already present; the account's DID document advertises the labeler
@@ -97,9 +104,18 @@ export function getConfig(): PdsConfig {
     dpopReplayStoreKind:
       process.env.PDS_DPOP_REPLAY_STORE === 'redis' ? 'redis' : 'in-memory',
     adminHandle: resolveAdminHandle(),
+    firehoseRetentionDays: resolveFirehoseRetentionDays(),
     modTeamHandle: resolveModTeamHandle(hostname),
   }
   return cached
+}
+
+function resolveFirehoseRetentionDays(): number | null {
+  const raw = process.env.PDS_FIREHOSE_RETENTION_DAYS
+  if (!raw) return null
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isFinite(n) || n < 1) return null
+  return n
 }
 
 function resolveLogLevel(): LogLevel {
