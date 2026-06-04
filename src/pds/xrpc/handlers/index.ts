@@ -95,6 +95,20 @@ import * as ozoneGetRecord from './tools.ozone.moderation.getRecord'
 // label surface (chapter 24)
 import * as labelQueryLabels from './com.atproto.label.queryLabels'
 import * as labelSubscribeLabels from './com.atproto.label.subscribeLabels'
+// ozone-extension surfaces: team / setting / set
+import * as ozoneTeamList from './tools.ozone.team.listMembers'
+import * as ozoneTeamAdd from './tools.ozone.team.addMember'
+import * as ozoneTeamUpdate from './tools.ozone.team.updateMember'
+import * as ozoneTeamDelete from './tools.ozone.team.deleteMember'
+import * as ozoneSettingUpsert from './tools.ozone.setting.upsertOption'
+import * as ozoneSettingList from './tools.ozone.setting.listOptions'
+import * as ozoneSettingRemove from './tools.ozone.setting.removeOptions'
+import * as ozoneSetUpsert from './tools.ozone.set.upsertSet'
+import * as ozoneSetDelete from './tools.ozone.set.deleteSet'
+import * as ozoneSetQuery from './tools.ozone.set.querySets'
+import * as ozoneSetGetValues from './tools.ozone.set.getValues'
+import * as ozoneSetAddValues from './tools.ozone.set.addValues'
+import * as ozoneSetDeleteValues from './tools.ozone.set.deleteValues'
 // moderation
 import * as createReport from './com.atproto.moderation.createReport'
 // identity (migration-destination)
@@ -180,3 +194,16 @@ export const registry = new HandlerRegistry()
   .register(ozoneGetRecord.nsid, ozoneGetRecord.def)
   .register(labelQueryLabels.nsid, labelQueryLabels.def)
   .register(labelSubscribeLabels.nsid, labelSubscribeLabels.def)
+  .register(ozoneTeamList.nsid, ozoneTeamList.def)
+  .register(ozoneTeamAdd.nsid, ozoneTeamAdd.def)
+  .register(ozoneTeamUpdate.nsid, ozoneTeamUpdate.def)
+  .register(ozoneTeamDelete.nsid, ozoneTeamDelete.def)
+  .register(ozoneSettingUpsert.nsid, ozoneSettingUpsert.def)
+  .register(ozoneSettingList.nsid, ozoneSettingList.def)
+  .register(ozoneSettingRemove.nsid, ozoneSettingRemove.def)
+  .register(ozoneSetUpsert.nsid, ozoneSetUpsert.def)
+  .register(ozoneSetDelete.nsid, ozoneSetDelete.def)
+  .register(ozoneSetQuery.nsid, ozoneSetQuery.def)
+  .register(ozoneSetGetValues.nsid, ozoneSetGetValues.def)
+  .register(ozoneSetAddValues.nsid, ozoneSetAddValues.def)
+  .register(ozoneSetDeleteValues.nsid, ozoneSetDeleteValues.def)
