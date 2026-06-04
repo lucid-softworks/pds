@@ -1,6 +1,13 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { formatBytes, formatCount, formatDuration, type PdsStats } from '~/lib/stats'
+import {
+  formatBytes,
+  formatCount,
+  formatDuration,
+  formatHz,
+  formatPercent,
+  type PdsStats,
+} from '~/lib/stats'
 
 // `~/lib/stats.server` imports `~/lib/db` → postgres-js, which doesn't
 // browser-bundle. Dynamic-import inside the handler so it stays out of the
@@ -43,7 +50,7 @@ function HomePage() {
         </div>
       </header>
 
-      <section className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <section className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Accounts" value={formatCount(stats.accounts.active)} sub={`${formatCount(stats.accounts.total)} total`}>
           <Breakdown
             items={[
@@ -78,27 +85,9 @@ function HomePage() {
           />
         </StatCard>
 
-        <StatCard
-          label="Host"
-          value={stats.host.loadavg[0].toFixed(2)}
-          sub={`load · ${stats.host.cpus} CPU${stats.host.cpus !== 1 ? 's' : ''} · up ${formatDuration(stats.host.uptime)}`}
-        >
-          <dl className="space-y-1 text-xs font-mono">
-            <div className="flex justify-between">
-              <dt className="text-[var(--color-fg-muted)]">memory</dt>
-              <dd className="tabular-nums">{formatBytes(stats.host.memory.used)} / {formatBytes(stats.host.memory.total)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-[var(--color-fg-muted)]">process</dt>
-              <dd className="tabular-nums">{formatBytes(stats.host.processRss)} rss</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-[var(--color-fg-muted)]">load 5/15m</dt>
-              <dd className="tabular-nums">{stats.host.loadavg[1].toFixed(2)} / {stats.host.loadavg[2].toFixed(2)}</dd>
-            </div>
-          </dl>
-        </StatCard>
       </section>
+
+      <HostPanel host={stats.host} />
 
       <section className="mt-12 grid gap-4 md:grid-cols-2">
         <LinkCard title="Read the docs" href="/docs" internal>
@@ -162,6 +151,94 @@ function StatCard({
       {children ? <div className="mt-4">{children}</div> : null}
     </div>
   )
+}
+
+function HostPanel({ host }: { host: PdsStats['host'] }) {
+  const memPct = formatPercent(host.memory.used, host.memory.total)
+  const heapPct = formatPercent(host.process.heapUsed, host.process.heapTotal)
+  const diskPct = host.blobDisk
+    ? formatPercent(host.blobDisk.used, host.blobDisk.total)
+    : null
+  return (
+    <section className="mt-10">
+      <header className="mb-3 flex items-baseline justify-between">
+        <h2 className="font-mono text-xs uppercase tracking-widest text-[var(--color-accent-2)]">
+          Host
+        </h2>
+        <p className="font-mono text-xs text-[var(--color-fg-muted)] tabular-nums">
+          {host.platform} {host.osRelease} · {host.arch} · Node {host.nodeVersion} · pid {host.pid}
+        </p>
+      </header>
+
+      <div className="grid gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 md:grid-cols-2 lg:grid-cols-4">
+        <HostGroup title="CPU">
+          <HostLine k="model" v={host.cpu.model} />
+          <HostLine k="cores" v={`${host.cpu.cores} @ ${formatHz(host.cpu.speedMhz)}`} />
+          <HostSpacer />
+          <HostLine k="load 1m" v={host.loadavg[0].toFixed(2)} />
+          <HostLine k="load 5m" v={host.loadavg[1].toFixed(2)} />
+          <HostLine k="load 15m" v={host.loadavg[2].toFixed(2)} />
+        </HostGroup>
+
+        <HostGroup title="Memory">
+          <HostLine k="used" v={`${formatBytes(host.memory.used)} / ${formatBytes(host.memory.total)}`} />
+          <HostLine k="free" v={formatBytes(host.memory.free)} />
+          <HostLine k="usage" v={memPct} />
+          <HostSpacer />
+          <HostLine k="rss" v={formatBytes(host.process.rss)} />
+          <HostLine k="heap" v={`${formatBytes(host.process.heapUsed)} / ${formatBytes(host.process.heapTotal)} (${heapPct})`} />
+        </HostGroup>
+
+        <HostGroup title="Blob storage">
+          {host.blobDisk ? (
+            <>
+              <HostLine k="mount" v={host.blobDisk.mount} mono />
+              <HostLine k="used" v={`${formatBytes(host.blobDisk.used)} / ${formatBytes(host.blobDisk.total)}`} />
+              <HostLine k="usage" v={diskPct ?? '—'} />
+            </>
+          ) : (
+            <p className="text-xs text-[var(--color-fg-muted)]">
+              statfs unavailable on this platform.
+            </p>
+          )}
+        </HostGroup>
+
+        <HostGroup title="Uptime">
+          <HostLine k="system" v={formatDuration(host.uptime)} />
+          <HostLine k="process" v={formatDuration(host.processUptime)} />
+        </HostGroup>
+      </div>
+    </section>
+  )
+}
+
+function HostGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h3 className="mb-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-fg-muted)]">
+        {title}
+      </h3>
+      <dl className="space-y-1 text-xs font-mono">{children}</dl>
+    </div>
+  )
+}
+
+function HostLine({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <dt className="shrink-0 text-[var(--color-fg-muted)]">{k}</dt>
+      <dd
+        className={`truncate tabular-nums text-right${mono ? ' font-mono' : ''}`}
+        title={v}
+      >
+        {v}
+      </dd>
+    </div>
+  )
+}
+
+function HostSpacer() {
+  return <div aria-hidden className="my-1 border-t border-[var(--color-border)]/40" />
 }
 
 function Breakdown({ items }: { items: Array<[string, number]> }) {

@@ -5,6 +5,7 @@
 // `./stats.ts` and is safe to import statically.
 
 import * as os from 'node:os'
+import { statfs } from 'node:fs/promises'
 import { sql } from 'drizzle-orm'
 import { db } from '~/lib/db'
 import { accounts, blobs, records, repoSeq, repos } from '~/lib/db/schema'
@@ -81,19 +82,50 @@ export async function getPdsStats(): Promise<PdsStats> {
       latestSeq: Number(latestSeqRow?.seq ?? 0),
       eventCounts,
     },
-    host: getHostStats(),
+    host: await getHostStats(),
   }
 }
 
-function getHostStats(): PdsStats['host'] {
+async function getHostStats(): Promise<PdsStats['host']> {
   const load = os.loadavg()
   const total = os.totalmem()
   const free = os.freemem()
+  const cpus = os.cpus()
+  const first = cpus[0]
+  const mem = process.memoryUsage()
   return {
+    platform: os.platform(),
+    arch: os.arch(),
+    osRelease: os.release(),
+    nodeVersion: process.version,
+    pid: process.pid,
+    cpu: {
+      model: first?.model.trim() ?? 'unknown',
+      cores: cpus.length,
+      speedMhz: first?.speed ?? 0,
+    },
     loadavg: [load[0] ?? 0, load[1] ?? 0, load[2] ?? 0],
-    cpus: os.cpus().length,
-    memory: { used: total - free, total },
+    memory: { used: total - free, total, free },
+    process: {
+      rss: mem.rss,
+      heapUsed: mem.heapUsed,
+      heapTotal: mem.heapTotal,
+      external: mem.external,
+    },
     uptime: Math.floor(os.uptime()),
-    processRss: process.memoryUsage().rss,
+    processUptime: Math.floor(process.uptime()),
+    blobDisk: await getBlobDiskStats(),
+  }
+}
+
+async function getBlobDiskStats(): Promise<PdsStats['host']['blobDisk']> {
+  const mount = getConfig().blobStoreDir
+  try {
+    const s = await statfs(mount)
+    const total = Number(s.bsize) * Number(s.blocks)
+    const free = Number(s.bsize) * Number(s.bavail)
+    return { used: total - free, total, mount }
+  } catch {
+    return null
   }
 }

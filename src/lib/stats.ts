@@ -36,11 +36,29 @@ export type PdsStats = {
     }
   }
   host: {
+    platform: string
+    arch: string
+    osRelease: string
+    nodeVersion: string
+    pid: number
+    cpu: {
+      model: string
+      cores: number
+      speedMhz: number
+    }
     loadavg: [number, number, number]
-    cpus: number
-    memory: { used: number; total: number }
+    memory: { used: number; total: number; free: number }
+    process: {
+      rss: number
+      heapUsed: number
+      heapTotal: number
+      external: number
+    }
     uptime: number
-    processRss: number
+    processUptime: number
+    /** Disk usage of the directory backing blob storage. `null` if the
+     *  probe failed (e.g. statfs unavailable, BLOB_DIR doesn't exist). */
+    blobDisk: { used: number; total: number; mount: string } | null
   }
 }
 
@@ -59,7 +77,19 @@ export function formatDuration(seconds: number): string {
   const d = Math.floor(seconds / 86400)
   const h = Math.floor((seconds % 86400) / 3600)
   const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
   if (d > 0) return `${d}d ${h}h`
   if (h > 0) return `${h}h ${m}m`
-  return `${m}m`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
+
+export function formatHz(mhz: number): string {
+  if (mhz >= 1000) return `${(mhz / 1000).toFixed(2)} GHz`
+  return `${mhz} MHz`
+}
+
+export function formatPercent(used: number, total: number): string {
+  if (total === 0) return '—'
+  return `${((used / total) * 100).toFixed(1)}%`
 }
