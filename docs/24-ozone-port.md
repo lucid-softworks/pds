@@ -51,7 +51,7 @@ schema, separate UI, separate auth gate) but share the runtime.
 The moderation surface is "owned" by one atproto account on this PDS,
 configurable via `PDS_MOD_TEAM_HANDLE` (default `mod.<hostname>`).
 The operator creates that account through the normal signup flow —
-nothing special is needed. Once it exists, four things happen on the
+nothing special is needed. Once it exists, five things happen on the
 next `getModTeamLead()` call (lazy, cached for the process lifetime):
 
 1. **A row in `mod_team`** with `role='lead'` is auto-seeded.
@@ -63,11 +63,19 @@ next `getModTeamLead()` call (lazy, cached for the process lifetime):
    re-resolve the DID document. Idempotent — `ensureLabelerService`
    in `src/pds/did/plc.ts` short-circuits when the entry is already
    present.
-3. **The account's local DID document grows the same entry.**
+3. **An `app.bsky.labeler.service` self-record is created** in the
+   lead's repo, declaring the labeler exists. The DID-doc service
+   entry alone is necessary but not sufficient — bsky.app's AppView
+   surfaces an account *as* a labeler in its UI by indexing this
+   record. We ship the minimum valid declaration (`policies:
+   { labelValues: [] }`); the operator can later edit it via
+   `putRecord` to declare custom label values, definitions, and a
+   self-applied profile label.
+4. **The account's local DID document grows the same entry.**
    `buildDidDocument`'s `isLabeler` flag is set when the DID matches
    the team lead, so our own `resolveLocalDid` / `describeRepo`
    responses include `#atproto_labeler` alongside `#atproto_pds`.
-4. **The labels table is signed with that account's key.** Every
+5. **The labels table is signed with that account's key.** Every
    label emitted via `tools.ozone.moderation.emitEvent#modEventLabel`
    is signed with the team-lead's repo signing key — the same key
    that signs the account's own MST commits. Downstream consumers

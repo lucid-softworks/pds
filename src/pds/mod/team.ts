@@ -17,11 +17,12 @@
 
 import { and, eq } from 'drizzle-orm'
 import { db } from '~/lib/db'
-import { accounts, modTeam, type ModTeamMember } from '~/lib/db/schema'
+import { accounts, modTeam, records, type ModTeamMember } from '~/lib/db/schema'
 import { getConfig } from '~/lib/config'
 import { getKeyWrapper } from '~/pds/auth/key_wrap'
 import { ensureLabelerService } from '~/pds/did/plc'
 import { emitIdentity } from '~/pds/sequencer/sequence'
+import { applyWrites } from '~/pds/repo/writes'
 
 export type ModTeamLead = {
   did: string
@@ -57,6 +58,13 @@ export async function getModTeamLead(): Promise<ModTeamLead | null> {
   await ensureLeadLabelerService(cachedLead.did).catch((err) => {
     console.warn(
       '[mod] failed to ensure labeler service for lead',
+      cachedLead?.did,
+      err,
+    )
+  })
+  await ensureLeadLabelerRecord(cachedLead.did).catch((err) => {
+    console.warn(
+      '[mod] failed to ensure app.bsky.labeler.service record for lead',
       cachedLead?.did,
       err,
     )
@@ -139,6 +147,49 @@ async function ensureLeadRow(did: string): Promise<void> {
     .insert(modTeam)
     .values({ did, role: 'lead', addedBy: null })
     .onConflictDoNothing({ target: modTeam.did })
+}
+
+/** Create the minimal `app.bsky.labeler.service` self-record in the
+ *  lead's repo if one doesn't exist yet. The DID-doc service entry
+ *  (added by `ensureLeadLabelerService`) is necessary but not
+ *  sufficient for bsky.app to surface the account *as* a labeler —
+ *  it also indexes this record to learn the labeler's name + label
+ *  values.
+ *
+ *  We ship the smallest valid declaration (empty `labelValues`); a
+ *  human operator can later edit the record via `putRecord` to add
+ *  the labels they're actually offering. Idempotent — we no-op if
+ *  the (collection, rkey) pair is already present. */
+async function ensureLeadLabelerRecord(did: string): Promise<void> {
+  const existing = await db
+    .select({ cid: records.cid })
+    .from(records)
+    .where(
+      and(
+        eq(records.repoDid, did),
+        eq(records.collection, 'app.bsky.labeler.service'),
+        eq(records.rkey, 'self'),
+      ),
+    )
+    .limit(1)
+  if (existing.length > 0) return
+  await applyWrites({
+    did,
+    writes: [
+      {
+        action: 'create',
+        collection: 'app.bsky.labeler.service',
+        rkey: 'self',
+        value: {
+          $type: 'app.bsky.labeler.service',
+          policies: {
+            labelValues: [],
+          },
+          createdAt: new Date().toISOString(),
+        },
+      },
+    ],
+  })
 }
 
 /** Unwrap the account's rotation key and rotate its PLC op to include
