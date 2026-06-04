@@ -30,7 +30,7 @@ on React, the router, or the docs UI. Each subdirectory matches a chapter in
 Every XRPC handler lives under [`xrpc/handlers/`](./xrpc/handlers/) as a
 single file named after its NSID. The handler registry (one line per
 endpoint) is in [`xrpc/handlers/index.ts`](./xrpc/handlers/index.ts).
-Currently shipped (106):
+Currently shipped (112):
 
 ```
 ─── com.atproto.server.* ───────────────────────────────────────

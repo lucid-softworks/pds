@@ -66,7 +66,7 @@ The docs site is part of the app. Run it locally and read at
 | `com.atproto.admin.*` | getAccountInfo, getAccountInfos, updateAccountStatus, updateSubjectStatus, getSubjectStatus, updateAccountHandle, updateAccountEmail, updateAccountPassword, sendEmail, deleteAccount, disableAccountInvites, enableAccountInvites, disableInviteCodes, getInviteCodes, getAuditLog |
 | `com.atproto.moderation.*` | createReport |
 | `com.atproto.label.*` | queryLabels, subscribeLabels (WebSocket; signed labels from the bundled labeler) |
-| `tools.ozone.moderation.*` | emitEvent (10 event types), queryEvents, queryStatuses, getEvent, getRepo, getRecord |
+| `tools.ozone.moderation.*` | emitEvent (16 event types), queryEvents, queryStatuses, getEvent, getRepo, getRecord, getRepos, getRecords, getSubjects, getAccountTimeline, getReporterStats, searchRepos |
 | `tools.ozone.team.*` | listMembers, addMember, updateMember, deleteMember |
 | `tools.ozone.setting.*` | upsertOption, listOptions, removeOptions |
 | `tools.ozone.set.*` | upsertSet, deleteSet, querySets, getValues, addValues, deleteValues |

@@ -92,6 +92,12 @@ import * as ozoneQueryStatuses from './tools.ozone.moderation.queryStatuses'
 import * as ozoneGetEvent from './tools.ozone.moderation.getEvent'
 import * as ozoneGetRepo from './tools.ozone.moderation.getRepo'
 import * as ozoneGetRecord from './tools.ozone.moderation.getRecord'
+import * as ozoneGetAccountTimeline from './tools.ozone.moderation.getAccountTimeline'
+import * as ozoneSearchRepos from './tools.ozone.moderation.searchRepos'
+import * as ozoneGetReporterStats from './tools.ozone.moderation.getReporterStats'
+import * as ozoneGetRepos from './tools.ozone.moderation.getRepos'
+import * as ozoneGetRecords from './tools.ozone.moderation.getRecords'
+import * as ozoneGetSubjects from './tools.ozone.moderation.getSubjects'
 // label surface (chapter 24)
 import * as labelQueryLabels from './com.atproto.label.queryLabels'
 import * as labelSubscribeLabels from './com.atproto.label.subscribeLabels'
@@ -207,6 +213,12 @@ export const registry = new HandlerRegistry()
   .register(ozoneGetEvent.nsid, ozoneGetEvent.def)
   .register(ozoneGetRepo.nsid, ozoneGetRepo.def)
   .register(ozoneGetRecord.nsid, ozoneGetRecord.def)
+  .register(ozoneGetAccountTimeline.nsid, ozoneGetAccountTimeline.def)
+  .register(ozoneSearchRepos.nsid, ozoneSearchRepos.def)
+  .register(ozoneGetReporterStats.nsid, ozoneGetReporterStats.def)
+  .register(ozoneGetRepos.nsid, ozoneGetRepos.def)
+  .register(ozoneGetRecords.nsid, ozoneGetRecords.def)
+  .register(ozoneGetSubjects.nsid, ozoneGetSubjects.def)
   .register(labelQueryLabels.nsid, labelQueryLabels.def)
   .register(labelSubscribeLabels.nsid, labelSubscribeLabels.def)
   .register(ozoneTeamList.nsid, ozoneTeamList.def)
