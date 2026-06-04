@@ -88,6 +88,26 @@ export const Route = createFileRoute('/mod/')({
   </div>
 </div>
 
+<h2>Surfaces</h2>
+<div class="grid grid-4">
+  <a href="/mod/reports" class="card" style="text-decoration: none;">
+    <div class="stat-label">Reports</div>
+    <div class="stat-sub">user reports, with assign / route / activity log</div>
+  </a>
+  <a href="/mod/queues" class="card" style="text-decoration: none;">
+    <div class="stat-label">Queues</div>
+    <div class="stat-sub">operator-defined routing buckets + assignments</div>
+  </a>
+  <a href="/mod/events" class="card" style="text-decoration: none;">
+    <div class="stat-label">Events</div>
+    <div class="stat-sub">append-only operator action log</div>
+  </a>
+  <a href="/mod/labels" class="card" style="text-decoration: none;">
+    <div class="stat-label">Labels</div>
+    <div class="stat-sub">signed labels emitted by this labeler</div>
+  </a>
+</div>
+
 <h2>Subject lookup</h2>
 <form action="/mod/subject" method="GET" class="form">
   <label>

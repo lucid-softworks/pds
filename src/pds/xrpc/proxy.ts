@@ -34,8 +34,31 @@ import { accounts } from '~/lib/db/schema'
 import { resolveDid } from '~/pds/did/resolver'
 import { getKeyWrapper } from '~/pds/auth/key_wrap'
 import { mintServiceAuthWithKey } from '~/pds/auth/service_auth'
-import { applyReadAfterWrite } from '~/pds/read_after_write'
-import { getAuthorFeedMunge, type AuthorFeedResponse } from '~/pds/read_after_write/munges/getAuthorFeed'
+import { applyReadAfterWrite, type MungeFn } from '~/pds/read_after_write'
+import {
+  getAuthorFeedMunge,
+  type AuthorFeedResponse,
+} from '~/pds/read_after_write/munges/getAuthorFeed'
+import {
+  getTimelineMunge,
+  type TimelineResponse,
+} from '~/pds/read_after_write/munges/getTimeline'
+import {
+  getProfileMunge,
+  type ProfileResponse,
+} from '~/pds/read_after_write/munges/getProfile'
+import {
+  getProfilesMunge,
+  type ProfilesResponse,
+} from '~/pds/read_after_write/munges/getProfiles'
+import {
+  getPostThreadMunge,
+  type ThreadResponse,
+} from '~/pds/read_after_write/munges/getPostThread'
+import {
+  getActorLikesMunge,
+  type ActorLikesResponse,
+} from '~/pds/read_after_write/munges/getActorLikes'
 import { BadRequest, NotFound, InternalError, Unauthorized } from './errors'
 
 /** NSIDs whose proxied response benefits from read-after-write — the
@@ -43,16 +66,19 @@ import { BadRequest, NotFound, InternalError, Unauthorized } from './errors'
  *  and we merge in the missing records before returning. */
 const READ_AFTER_WRITE_MUNGES: Record<
   string,
-  (
-    res: Response,
-    requester: string,
-  ) => Promise<Response>
+  (res: Response, requester: string) => Promise<Response>
 > = {
-  'app.bsky.feed.getAuthorFeed': (res, requester) =>
-    applyReadAfterWrite<AuthorFeedResponse>(res, {
-      requester,
-      munge: getAuthorFeedMunge,
-    }),
+  'app.bsky.feed.getAuthorFeed': mkMunger(getAuthorFeedMunge as MungeFn<AuthorFeedResponse>),
+  'app.bsky.feed.getTimeline': mkMunger(getTimelineMunge as MungeFn<TimelineResponse>),
+  'app.bsky.actor.getProfile': mkMunger(getProfileMunge as MungeFn<ProfileResponse>),
+  'app.bsky.actor.getProfiles': mkMunger(getProfilesMunge as MungeFn<ProfilesResponse>),
+  'app.bsky.feed.getPostThread': mkMunger(getPostThreadMunge as MungeFn<ThreadResponse>),
+  'app.bsky.feed.getActorLikes': mkMunger(getActorLikesMunge as MungeFn<ActorLikesResponse>),
+}
+
+function mkMunger<T>(munge: MungeFn<T>) {
+  return (res: Response, requester: string): Promise<Response> =>
+    applyReadAfterWrite<T>(res, { requester, munge })
 }
 
 /** Headers we strip when forwarding upstream. `host`, `connection`,

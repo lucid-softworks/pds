@@ -31,6 +31,8 @@ import { Route as ModSignaturesRouteImport } from './routes/mod/signatures'
 import { Route as ModSettingsRouteImport } from './routes/mod/settings'
 import { Route as ModSetsRouteImport } from './routes/mod/sets'
 import { Route as ModSafelinkRouteImport } from './routes/mod/safelink'
+import { Route as ModReportsRouteImport } from './routes/mod/reports'
+import { Route as ModQueuesRouteImport } from './routes/mod/queues'
 import { Route as ModLogoutRouteImport } from './routes/mod/logout'
 import { Route as ModLoginRouteImport } from './routes/mod/login'
 import { Route as ModLabelsRouteImport } from './routes/mod/labels'
@@ -155,6 +157,16 @@ const ModSafelinkRoute = ModSafelinkRouteImport.update({
   path: '/mod/safelink',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ModReportsRoute = ModReportsRouteImport.update({
+  id: '/mod/reports',
+  path: '/mod/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModQueuesRoute = ModQueuesRouteImport.update({
+  id: '/mod/queues',
+  path: '/mod/queues',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ModLogoutRoute = ModLogoutRouteImport.update({
   id: '/mod/logout',
   path: '/mod/logout',
@@ -240,6 +252,8 @@ export interface FileRoutesByFullPath {
   '/mod/labels': typeof ModLabelsRoute
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
+  '/mod/queues': typeof ModQueuesRoute
+  '/mod/reports': typeof ModReportsRoute
   '/mod/safelink': typeof ModSafelinkRoute
   '/mod/sets': typeof ModSetsRoute
   '/mod/settings': typeof ModSettingsRoute
@@ -276,6 +290,8 @@ export interface FileRoutesByTo {
   '/mod/labels': typeof ModLabelsRoute
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
+  '/mod/queues': typeof ModQueuesRoute
+  '/mod/reports': typeof ModReportsRoute
   '/mod/safelink': typeof ModSafelinkRoute
   '/mod/sets': typeof ModSetsRoute
   '/mod/settings': typeof ModSettingsRoute
@@ -314,6 +330,8 @@ export interface FileRoutesById {
   '/mod/labels': typeof ModLabelsRoute
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
+  '/mod/queues': typeof ModQueuesRoute
+  '/mod/reports': typeof ModReportsRoute
   '/mod/safelink': typeof ModSafelinkRoute
   '/mod/sets': typeof ModSetsRoute
   '/mod/settings': typeof ModSettingsRoute
@@ -353,6 +371,8 @@ export interface FileRouteTypes {
     | '/mod/labels'
     | '/mod/login'
     | '/mod/logout'
+    | '/mod/queues'
+    | '/mod/reports'
     | '/mod/safelink'
     | '/mod/sets'
     | '/mod/settings'
@@ -389,6 +409,8 @@ export interface FileRouteTypes {
     | '/mod/labels'
     | '/mod/login'
     | '/mod/logout'
+    | '/mod/queues'
+    | '/mod/reports'
     | '/mod/safelink'
     | '/mod/sets'
     | '/mod/settings'
@@ -426,6 +448,8 @@ export interface FileRouteTypes {
     | '/mod/labels'
     | '/mod/login'
     | '/mod/logout'
+    | '/mod/queues'
+    | '/mod/reports'
     | '/mod/safelink'
     | '/mod/sets'
     | '/mod/settings'
@@ -462,6 +486,8 @@ export interface RootRouteChildren {
   ModLabelsRoute: typeof ModLabelsRoute
   ModLoginRoute: typeof ModLoginRoute
   ModLogoutRoute: typeof ModLogoutRoute
+  ModQueuesRoute: typeof ModQueuesRoute
+  ModReportsRoute: typeof ModReportsRoute
   ModSafelinkRoute: typeof ModSafelinkRoute
   ModSetsRoute: typeof ModSetsRoute
   ModSettingsRoute: typeof ModSettingsRoute
@@ -637,6 +663,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ModSafelinkRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mod/reports': {
+      id: '/mod/reports'
+      path: '/mod/reports'
+      fullPath: '/mod/reports'
+      preLoaderRoute: typeof ModReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/queues': {
+      id: '/mod/queues'
+      path: '/mod/queues'
+      fullPath: '/mod/queues'
+      preLoaderRoute: typeof ModQueuesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/mod/logout': {
       id: '/mod/logout'
       path: '/mod/logout'
@@ -763,6 +803,8 @@ const rootRouteChildren: RootRouteChildren = {
   ModLabelsRoute: ModLabelsRoute,
   ModLoginRoute: ModLoginRoute,
   ModLogoutRoute: ModLogoutRoute,
+  ModQueuesRoute: ModQueuesRoute,
+  ModReportsRoute: ModReportsRoute,
   ModSafelinkRoute: ModSafelinkRoute,
   ModSetsRoute: ModSetsRoute,
   ModSettingsRoute: ModSettingsRoute,

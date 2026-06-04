@@ -284,6 +284,65 @@ describe('tools.ozone.queue.* + tools.ozone.report.*', () => {
     expect(body.viewer.role).toBe('tools.ozone.team.defs#roleAdmin')
   })
 
+  it('moderator-Bearer reaches the gated surfaces too', async () => {
+    // Provision a moderator on the team and mint a session JWT for them.
+    const { createAccount } = await import('~/pds/account/create')
+    const { createSessionTokens } = await import('~/pds/auth/session')
+    const { addModerator, getModTeamLead, clearModTeamCache } = await import(
+      '~/pds/mod/team'
+    )
+
+    clearModTeamCache()
+    // Ensure the lead exists so requireModerator's team check works
+    // against a non-empty roster. The lead handle is `mod.test`.
+    let lead = await getModTeamLead().catch(() => null)
+    if (!lead) {
+      const leadAccount = await createAccount({
+        handle: 'mod.test',
+        email: `mod-bearer-${Date.now()}@example.test`,
+        password: 'lead-password',
+      })
+      lead = { did: leadAccount.did, role: 'lead' }
+      await getModTeamLead() // triggers lazy seed
+    }
+
+    // A second account becomes a moderator (non-lead).
+    const modAccount = await createAccount({
+      handle: `bearer-${Date.now()}.example.com`,
+      email: `bearer-${Date.now()}@example.test`,
+      password: 'mod-password',
+    })
+    await addModerator({ did: modAccount.did, role: 'moderator', addedBy: lead.did })
+    const { accessJwt } = await createSessionTokens(modAccount.did)
+
+    // Gated read: listQueues
+    const listed = await call('tools.ozone.queue.listQueues', {
+      auth: `Bearer ${accessJwt}`,
+    })
+    expect(listed.status).toBe(200)
+
+    // getConfig returns moderator role for a Bearer caller (not Admin)
+    const config = await call('tools.ozone.server.getConfig', {
+      auth: `Bearer ${accessJwt}`,
+    })
+    expect(config.status).toBe(200)
+    expect((config.body as { viewer: { role: string } }).viewer.role).toBe(
+      'tools.ozone.team.defs#roleModerator',
+    )
+
+    // A normal account (not on the team) gets a 403.
+    const stranger = await createAccount({
+      handle: `stranger-${Date.now()}.example.com`,
+      email: `stranger-${Date.now()}@example.test`,
+      password: 'stranger-password',
+    })
+    const strangerJwt = (await createSessionTokens(stranger.did)).accessJwt
+    const rejected = await call('tools.ozone.queue.listQueues', {
+      auth: `Bearer ${strangerJwt}`,
+    })
+    expect(rejected.status).toBe(403)
+  })
+
   it('deleteQueue soft-deletes and migrates reports to a different queue', async () => {
     // Make a destination queue first.
     const dest = await call('tools.ozone.queue.createQueue', {

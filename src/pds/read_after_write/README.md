@@ -27,6 +27,11 @@ The merged response is what we return to the client.
 | NSID | Munge | Behavior |
 | --- | --- | --- |
 | `app.bsky.feed.getAuthorFeed` | `munges/getAuthorFeed.ts` | Prepends the requester's recent local posts to their own author feed. No-op for other users' feeds. |
+| `app.bsky.feed.getTimeline` | `munges/getTimeline.ts` | Splices the requester's recent local posts into the home timeline at the correct `indexedAt`-ordered position. |
+| `app.bsky.actor.getProfile` | `munges/getProfile.ts` | Overlays the local `app.bsky.actor.profile/self` record (displayName, description, avatar, banner) onto the requester's own profile response. No-op for other users' profiles. |
+| `app.bsky.actor.getProfiles` | `munges/getProfiles.ts` | Same as getProfile, applied to whichever entry in the batch matches the requester. |
+| `app.bsky.feed.getPostThread` | `munges/getPostThread.ts` | Walks the thread tree: refreshes any node whose URI matches a local record, and synthesizes new reply nodes for local replies the AppView hasn't indexed yet. |
+| `app.bsky.feed.getActorLikes` | `munges/getActorLikes.ts` | Refreshes feed entries whose post URI matches a local record (the rare "user liked their own just-edited post" case). |
 
 ## Adding a new munge
 
@@ -42,15 +47,18 @@ Pattern is:
 
 ### Endpoints this pattern fits
 
-These are the upstream PDS's read-after-write endpoints. The
-infrastructure here covers all of them; each needs its own munge:
+These are the upstream PDS's read-after-write endpoints. We ship a
+munge for every one upstream covers:
 
 - `app.bsky.feed.getAuthorFeed` — DONE
-- `app.bsky.feed.getTimeline` — TODO (prepend local posts to home feed)
-- `app.bsky.feed.getPostThread` — TODO (replace stale parent / inject local replies)
-- `app.bsky.feed.getActorLikes` — TODO (inject local likes)
-- `app.bsky.actor.getProfile` — TODO (merge updated profile record into the response)
-- `app.bsky.actor.getProfiles` — TODO (same, in batch)
-- `app.bsky.feed.getFeed` — TODO (custom feed; mostly pass-through, only inject if requester appears)
+- `app.bsky.feed.getTimeline` — DONE
+- `app.bsky.feed.getPostThread` — DONE
+- `app.bsky.feed.getActorLikes` — DONE
+- `app.bsky.actor.getProfile` — DONE
+- `app.bsky.actor.getProfiles` — DONE
+
+Upstream doesn't munge `app.bsky.feed.getFeed` (custom feeds run
+entirely on the AppView; there's no local merge to do), so we don't
+either.
 
 See chapter 17 — PDS vs AppView vs Relay (Read-after-write).
