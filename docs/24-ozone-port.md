@@ -159,6 +159,13 @@ Three XRPC handlers cover the read side:
 - `tools.ozone.moderation.queryStatuses` — paginated current-state
   view, reading from `mod_subject_status`.
 - `tools.ozone.moderation.getEvent` — single event by id.
+- `tools.ozone.moderation.getRepo` — moderation-context view of an
+  account: profile + current `mod_subject_status` + recent events +
+  applied labels, in one round-trip. Honours
+  `requireModerator` and *does* serve takendown accounts because
+  moderators need to see what they're moderating.
+- `tools.ozone.moderation.getRecord` — same shape for a single
+  record, keyed by AT-URI. Also serves takendown records.
 
 The event view is reconstructed from the DAG-CBOR snapshot
 `emitEvent` persisted, so the response shape matches exactly what the
@@ -198,7 +205,7 @@ mirroring `/admin`'s aesthetic.
 | `/mod/logout` | Clear the session cookie. |
 | `/mod/subject?q=…` | Single-subject view: state pills, action form, reports + events history. POST applies an action via `applyEmitEvent()`. |
 | `/mod/events` | Paginated event history with filters. |
-| `/mod/team` | Read-only roster. |
+| `/mod/team` | Roster + add/remove forms (lead-only mutations). |
 
 The session is a cookie-backed JWT scoped to `/mod`, separate from
 the `/admin` cookie scope so the two surfaces don't bleed. Admin
@@ -275,13 +282,42 @@ curl 'http://localhost:3000/xrpc/com.atproto.repo.describeRepo?repo=mod.localhos
 # Then visit http://localhost:3000/mod (log in as mod.localhost).
 ```
 
+## Takedown enforcement on reads
+
+A moderation decision that doesn't bite isn't a decision. After
+`modEventTakedown` flips `records.takedown_ref` (or `blobs.takedown_ref`,
+or `accounts.status`), every relevant *read* endpoint short-circuits
+before serving:
+
+| Endpoint | What it checks | Error on hit |
+| --- | --- | --- |
+| `com.atproto.repo.getRecord` | `records.takedown_ref` | `RecordNotFound` |
+| `com.atproto.repo.listRecords` | `WHERE takedown_ref IS NULL` | row omitted from listing |
+| `com.atproto.sync.getBlob` | `blobs.takedown_ref` | `BlobNotFound` |
+| `com.atproto.sync.getRecord` | `accounts.status` + `records.takedown_ref` | `RepoTakendown` / `RecordNotFound` |
+| `com.atproto.sync.getRepo` | `accounts.status` | `RepoTakendown` / `RepoDeactivated` |
+| `com.atproto.sync.getBlocks` | `accounts.status` | `RepoTakendown` / `RepoDeactivated` |
+
+The bytes stay in `repo_blocks` / on disk so a `modEventReverseTakedown`
+can restore them; we only stop *serving* them. From the caller's
+perspective the moderation decision is opaque — a takendown record
+looks indistinguishable from a deleted one. That's the property
+chapter 17 leans on when it says "the network honors signals or it
+doesn't; we just emit."
+
+Two read endpoints intentionally *do* serve takendown content because
+they exist for moderation work:
+
+- `tools.ozone.moderation.getRecord` — moderators need to see what
+  they're moderating
+- `tools.ozone.moderation.getRepo` — same logic, account scope
+
+Both are gated by `requireModerator`.
+
 ## Known gaps
 
 - **`subscribeLabels` (WebSocket).** Polled-only for now. Shape it
   like the firehose when you wire it.
-- **Roster UI.** `/mod/team` is read-only; add/remove flows live as
-  direct SQL inserts. A follow-up route would expose the obvious
-  form.
 - **Event types beyond the v1 six.** Mute, divert, email-out,
   scheduled takedown, age-assurance, identity-event, etc. The
   registry rejects them today; pick them up as needed.
@@ -298,9 +334,7 @@ curl 'http://localhost:3000/xrpc/com.atproto.repo.describeRepo?repo=mod.localhos
 2. Wire `subscribeLabels` as a second WebSocket route alongside
    `subscribeRepos`. Reuse the `srvx`-attached-http server pattern
    from chapter 16; tail by `labels.seq` ascending.
-3. Implement `tools.ozone.moderation.getRepo` and `getRecord` —
-   moderation-context views that bundle current status + recent
-   events + recent reports + applied labels for a single subject.
-   Today the `/mod/subject` page does this with three direct DB
-   queries; turning it into an XRPC endpoint lets external moderation
-   tools render the same view.
+3. Add a `mod_report_resolution` table linking each
+   `moderation_reports` row to the `mod_events.id` that closed it,
+   then expose a `resolved` / `open` filter on the dashboard. This
+   is the missing piece on the per-report resolution-state gap.

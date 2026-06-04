@@ -66,7 +66,7 @@ The docs site is part of the app. Run it locally and read at
 | `com.atproto.admin.*` | getAccountInfo, getAccountInfos, updateAccountStatus, updateSubjectStatus, getSubjectStatus, updateAccountHandle, updateAccountEmail, updateAccountPassword, sendEmail, deleteAccount, disableAccountInvites, enableAccountInvites, disableInviteCodes, getInviteCodes, getAuditLog |
 | `com.atproto.moderation.*` | createReport |
 | `com.atproto.label.*` | queryLabels (signed labels from the bundled labeler) |
-| `tools.ozone.moderation.*` | emitEvent, queryEvents, queryStatuses, getEvent |
+| `tools.ozone.moderation.*` | emitEvent, queryEvents, queryStatuses, getEvent, getRepo, getRecord |
 | OAuth routes | `/oauth/par`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/jwks` |
 | `/.well-known/*` | `did.json`, `oauth-authorization-server` (RFC 8414), `oauth-protected-resource` (RFC 9728) |
 | Operations | `/metrics` (Prometheus), `/admin` (operator UI), `/mod` (moderator UI), `/app` (in-tree client) |
