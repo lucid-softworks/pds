@@ -23,8 +23,11 @@ import { Route as OauthRevokeRouteImport } from './routes/oauth/revoke'
 import { Route as OauthParRouteImport } from './routes/oauth/par'
 import { Route as OauthJwksRouteImport } from './routes/oauth/jwks'
 import { Route as OauthAuthorizeRouteImport } from './routes/oauth/authorize'
+import { Route as ModVerificationsRouteImport } from './routes/mod/verifications'
+import { Route as ModTemplatesRouteImport } from './routes/mod/templates'
 import { Route as ModTeamRouteImport } from './routes/mod/team'
 import { Route as ModSubjectRouteImport } from './routes/mod/subject'
+import { Route as ModSafelinkRouteImport } from './routes/mod/safelink'
 import { Route as ModLogoutRouteImport } from './routes/mod/logout'
 import { Route as ModLoginRouteImport } from './routes/mod/login'
 import { Route as ModLabelsRouteImport } from './routes/mod/labels'
@@ -109,6 +112,16 @@ const OauthAuthorizeRoute = OauthAuthorizeRouteImport.update({
   path: '/oauth/authorize',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ModVerificationsRoute = ModVerificationsRouteImport.update({
+  id: '/mod/verifications',
+  path: '/mod/verifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModTemplatesRoute = ModTemplatesRouteImport.update({
+  id: '/mod/templates',
+  path: '/mod/templates',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ModTeamRoute = ModTeamRouteImport.update({
   id: '/mod/team',
   path: '/mod/team',
@@ -117,6 +130,11 @@ const ModTeamRoute = ModTeamRouteImport.update({
 const ModSubjectRoute = ModSubjectRouteImport.update({
   id: '/mod/subject',
   path: '/mod/subject',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModSafelinkRoute = ModSafelinkRouteImport.update({
+  id: '/mod/safelink',
+  path: '/mod/safelink',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModLogoutRoute = ModLogoutRouteImport.update({
@@ -204,8 +222,11 @@ export interface FileRoutesByFullPath {
   '/mod/labels': typeof ModLabelsRoute
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
+  '/mod/safelink': typeof ModSafelinkRoute
   '/mod/subject': typeof ModSubjectRoute
   '/mod/team': typeof ModTeamRoute
+  '/mod/templates': typeof ModTemplatesRoute
+  '/mod/verifications': typeof ModVerificationsRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/jwks': typeof OauthJwksRoute
   '/oauth/par': typeof OauthParRoute
@@ -234,8 +255,11 @@ export interface FileRoutesByTo {
   '/mod/labels': typeof ModLabelsRoute
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
+  '/mod/safelink': typeof ModSafelinkRoute
   '/mod/subject': typeof ModSubjectRoute
   '/mod/team': typeof ModTeamRoute
+  '/mod/templates': typeof ModTemplatesRoute
+  '/mod/verifications': typeof ModVerificationsRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/jwks': typeof OauthJwksRoute
   '/oauth/par': typeof OauthParRoute
@@ -266,8 +290,11 @@ export interface FileRoutesById {
   '/mod/labels': typeof ModLabelsRoute
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
+  '/mod/safelink': typeof ModSafelinkRoute
   '/mod/subject': typeof ModSubjectRoute
   '/mod/team': typeof ModTeamRoute
+  '/mod/templates': typeof ModTemplatesRoute
+  '/mod/verifications': typeof ModVerificationsRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/jwks': typeof OauthJwksRoute
   '/oauth/par': typeof OauthParRoute
@@ -299,8 +326,11 @@ export interface FileRouteTypes {
     | '/mod/labels'
     | '/mod/login'
     | '/mod/logout'
+    | '/mod/safelink'
     | '/mod/subject'
     | '/mod/team'
+    | '/mod/templates'
+    | '/mod/verifications'
     | '/oauth/authorize'
     | '/oauth/jwks'
     | '/oauth/par'
@@ -329,8 +359,11 @@ export interface FileRouteTypes {
     | '/mod/labels'
     | '/mod/login'
     | '/mod/logout'
+    | '/mod/safelink'
     | '/mod/subject'
     | '/mod/team'
+    | '/mod/templates'
+    | '/mod/verifications'
     | '/oauth/authorize'
     | '/oauth/jwks'
     | '/oauth/par'
@@ -360,8 +393,11 @@ export interface FileRouteTypes {
     | '/mod/labels'
     | '/mod/login'
     | '/mod/logout'
+    | '/mod/safelink'
     | '/mod/subject'
     | '/mod/team'
+    | '/mod/templates'
+    | '/mod/verifications'
     | '/oauth/authorize'
     | '/oauth/jwks'
     | '/oauth/par'
@@ -390,8 +426,11 @@ export interface RootRouteChildren {
   ModLabelsRoute: typeof ModLabelsRoute
   ModLoginRoute: typeof ModLoginRoute
   ModLogoutRoute: typeof ModLogoutRoute
+  ModSafelinkRoute: typeof ModSafelinkRoute
   ModSubjectRoute: typeof ModSubjectRoute
   ModTeamRoute: typeof ModTeamRoute
+  ModTemplatesRoute: typeof ModTemplatesRoute
+  ModVerificationsRoute: typeof ModVerificationsRoute
   OauthAuthorizeRoute: typeof OauthAuthorizeRoute
   OauthJwksRoute: typeof OauthJwksRoute
   OauthParRoute: typeof OauthParRoute
@@ -503,6 +542,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OauthAuthorizeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mod/verifications': {
+      id: '/mod/verifications'
+      path: '/mod/verifications'
+      fullPath: '/mod/verifications'
+      preLoaderRoute: typeof ModVerificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/templates': {
+      id: '/mod/templates'
+      path: '/mod/templates'
+      fullPath: '/mod/templates'
+      preLoaderRoute: typeof ModTemplatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/mod/team': {
       id: '/mod/team'
       path: '/mod/team'
@@ -515,6 +568,13 @@ declare module '@tanstack/react-router' {
       path: '/mod/subject'
       fullPath: '/mod/subject'
       preLoaderRoute: typeof ModSubjectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/safelink': {
+      id: '/mod/safelink'
+      path: '/mod/safelink'
+      fullPath: '/mod/safelink'
+      preLoaderRoute: typeof ModSafelinkRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mod/logout': {
@@ -643,8 +703,11 @@ const rootRouteChildren: RootRouteChildren = {
   ModLabelsRoute: ModLabelsRoute,
   ModLoginRoute: ModLoginRoute,
   ModLogoutRoute: ModLogoutRoute,
+  ModSafelinkRoute: ModSafelinkRoute,
   ModSubjectRoute: ModSubjectRoute,
   ModTeamRoute: ModTeamRoute,
+  ModTemplatesRoute: ModTemplatesRoute,
+  ModVerificationsRoute: ModVerificationsRoute,
   OauthAuthorizeRoute: OauthAuthorizeRoute,
   OauthJwksRoute: OauthJwksRoute,
   OauthParRoute: OauthParRoute,

@@ -10,6 +10,9 @@ const NAV_ITEMS = [
   { href: '/mod', label: 'Dashboard' },
   { href: '/mod/events', label: 'Events' },
   { href: '/mod/labels', label: 'Labels' },
+  { href: '/mod/safelink', label: 'Safelink' },
+  { href: '/mod/templates', label: 'Templates' },
+  { href: '/mod/verifications', label: 'Verifications' },
   { href: '/mod/team', label: 'Team' },
 ]
 

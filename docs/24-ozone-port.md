@@ -254,6 +254,10 @@ mirroring `/admin`'s aesthetic.
 | `/mod/logout` | Clear the session cookie. |
 | `/mod/subject?q=…` | Single-subject view: state pills, action form, reports + events history. POST applies an action via `applyEmitEvent()`. |
 | `/mod/events` | Paginated event history with filters. |
+| `/mod/labels` | Manage the labeler's value catalog (edit the `app.bsky.labeler.service` record) + paginated emission history. |
+| `/mod/safelink` | URL safety rules — block / warn / whitelist — plus the audit-event log. |
+| `/mod/templates` | Communication templates consumed by `modEventEmail`. |
+| `/mod/verifications` | Issued verification grants + single-grant form. |
 | `/mod/team` | Roster + add/remove forms (lead-only mutations). |
 
 The session is a cookie-backed JWT scoped to `/mod`, separate from
@@ -370,10 +374,11 @@ Both are gated by `requireModerator`.
   pick them up as needed. The v1 cut covered the operationally
   meaningful subset (takedown / reverseTakedown / comment /
   acknowledge / escalate / label / mute / unmute / divert / email).
-- **No /mod UI for the safelink / signature / verification / set /
-  setting / template surfaces.** They're driven entirely through
-  XRPC for now — an upstream Ozone web client would already work
-  against them, but our in-tree `/mod` doesn't surface them yet.
+- **No /mod UI yet for the `set.*` + `setting.*` + `signature.*`
+  XRPC surfaces.** They're driven entirely through XRPC — an upstream
+  Ozone web client already works against them — but our in-tree `/mod`
+  doesn't surface them yet. (`labels`, `safelink`, `templates`,
+  `verifications`, `team`, `events` all have UI.)
 
 ## Exercises
 
