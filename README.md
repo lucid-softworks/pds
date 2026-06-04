@@ -65,8 +65,15 @@ The docs site is part of the app. Run it locally and read at
 | `com.atproto.sync.*` (WS) | subscribeRepos |
 | `com.atproto.admin.*` | getAccountInfo, getAccountInfos, updateAccountStatus, updateSubjectStatus, getSubjectStatus, updateAccountHandle, updateAccountEmail, updateAccountPassword, sendEmail, deleteAccount, disableAccountInvites, enableAccountInvites, disableInviteCodes, getInviteCodes, getAuditLog |
 | `com.atproto.moderation.*` | createReport |
-| `com.atproto.label.*` | queryLabels (signed labels from the bundled labeler) |
-| `tools.ozone.moderation.*` | emitEvent, queryEvents, queryStatuses, getEvent, getRepo, getRecord |
+| `com.atproto.label.*` | queryLabels, subscribeLabels (WebSocket; signed labels from the bundled labeler) |
+| `tools.ozone.moderation.*` | emitEvent (10 event types), queryEvents, queryStatuses, getEvent, getRepo, getRecord |
+| `tools.ozone.team.*` | listMembers, addMember, updateMember, deleteMember |
+| `tools.ozone.setting.*` | upsertOption, listOptions, removeOptions |
+| `tools.ozone.set.*` | upsertSet, deleteSet, querySets, getValues, addValues, deleteValues |
+| `tools.ozone.communication.*` | createTemplate, updateTemplate, deleteTemplate, listTemplates |
+| `tools.ozone.verification.*` | grantVerifications, revokeVerifications, listVerifications |
+| `tools.ozone.signature.*` | searchAccounts, findRelatedAccounts, findCorrelation |
+| `tools.ozone.safelink.*` | addRule, updateRule, removeRule, queryRules, queryEvents |
 | OAuth routes | `/oauth/par`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/jwks` |
 | `/.well-known/*` | `did.json`, `oauth-authorization-server` (RFC 8414), `oauth-protected-resource` (RFC 9728) |
 | Operations | `/metrics` (Prometheus), `/admin` (operator UI), `/mod` (moderator UI), `/app` (in-tree client), `/internal/tls-check` (Caddy on-demand-TLS ask gate) |
@@ -96,7 +103,7 @@ through, plus the operator surface for moderation and migration work.
 - ✅ Minimal client UI at `/app` (login, feed, compose, image upload)
 - ✅ Production ergonomics: `KeyWrapper` for at-rest signing keys, structured logger, `/metrics`, graceful shutdown
 - ✅ Backups (`pnpm pds:export` / `pds:import`) + benchmarking (`pds-bench`, `pds-stress`)
-- ✅ Bundled Ozone-shaped moderation: `tools.ozone.moderation.*` XRPC (emitEvent + queryEvents + queryStatuses + getEvent + getRepo + getRecord), `com.atproto.label.queryLabels`, `/mod` operator UI, labeler DID-document service entry + `app.bsky.labeler.service` self-record auto-bootstrapped on team-lead signup, takedown enforcement on `repo.getRecord` / `listRecords` / `sync.getBlob` / `getRecord` / `getRepo` / `getBlocks`
+- ✅ Bundled Ozone-shaped moderation: full `tools.ozone.*` XRPC surface (moderation + team + setting + set + communication + verification + signature + safelink — 33 endpoints), `com.atproto.label.queryLabels` + `subscribeLabels` (WebSocket), `/mod` operator UI, labeler DID-document service entry + `app.bsky.labeler.service` self-record auto-bootstrapped on team-lead signup, takedown enforcement on `repo.getRecord` / `listRecords` / `sync.getBlob` / `getRecord` / `getRepo` / `getBlocks`, 10 supported event types (incl. mute / divert / email with template support), per-report auto-resolution on closing events
 
 ## Try it
 
@@ -193,7 +200,7 @@ pds/
 │   ├── pds-import.ts              # restore from CAR
 │   ├── pds-bench.ts               # micro-benchmark harness
 │   └── pds-stress.ts              # concurrent-write stress test
-├── drizzle/                       # 0000_init … 0016_moderation_service (17 migrations)
+├── drizzle/                       # 0000_init … 0020_mod_report_resolution (21 migrations)
 ├── src/
 │   ├── routes/                    # TanStack Start routes
 │   │   ├── index.tsx              #   live stats dashboard

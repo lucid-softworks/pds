@@ -22,25 +22,37 @@ narrative; this file is the in-tree map.
 
 ## XRPC handlers (registered in `../xrpc/handlers/index.ts`)
 
-| NSID | File |
+| Group | Endpoints |
 | --- | --- |
-| `tools.ozone.moderation.emitEvent` | `../xrpc/handlers/tools.ozone.moderation.emitEvent.ts` |
-| `tools.ozone.moderation.queryEvents` | `../xrpc/handlers/tools.ozone.moderation.queryEvents.ts` |
-| `tools.ozone.moderation.queryStatuses` | `../xrpc/handlers/tools.ozone.moderation.queryStatuses.ts` |
-| `tools.ozone.moderation.getEvent` | `../xrpc/handlers/tools.ozone.moderation.getEvent.ts` |
-| `tools.ozone.moderation.getRepo` | `../xrpc/handlers/tools.ozone.moderation.getRepo.ts` |
-| `tools.ozone.moderation.getRecord` | `../xrpc/handlers/tools.ozone.moderation.getRecord.ts` |
-| `com.atproto.label.queryLabels` | `../xrpc/handlers/com.atproto.label.queryLabels.ts` |
-| `com.atproto.moderation.createReport` | `../xrpc/handlers/com.atproto.moderation.createReport.ts` |
+| `tools.ozone.moderation.*` | emitEvent (10 event types) · queryEvents · queryStatuses · getEvent · getRepo · getRecord |
+| `tools.ozone.team.*` | listMembers · addMember · updateMember · deleteMember |
+| `tools.ozone.setting.*` | upsertOption · listOptions · removeOptions |
+| `tools.ozone.set.*` | upsertSet · deleteSet · querySets · getValues · addValues · deleteValues |
+| `tools.ozone.communication.*` | createTemplate · updateTemplate · deleteTemplate · listTemplates |
+| `tools.ozone.verification.*` | grantVerifications · revokeVerifications · listVerifications |
+| `tools.ozone.signature.*` | searchAccounts · findRelatedAccounts · findCorrelation |
+| `tools.ozone.safelink.*` | addRule · updateRule · removeRule · queryRules · queryEvents |
+| `com.atproto.label.*` | queryLabels · subscribeLabels (WebSocket) |
+| `com.atproto.moderation.*` | createReport |
 
-## Schema (see `../../lib/db/schema/moderation_service.ts`)
+## Schema
+
+Lives in `../../lib/db/schema/moderation_service.ts` and
+`../../lib/db/schema/ozone_extensions.ts`.
 
 | Table | Purpose |
 | --- | --- |
 | `mod_team` | Roster — DIDs authorised to operate the moderation surface, with `role` ∈ {`lead`, `moderator`}. |
 | `mod_events` | Append-only event log. Every `emitEvent` call writes one row, with the full DAG-CBOR snapshot of the original input in `metadata` for fidelity. |
 | `mod_subject_status` | Cache of the current state per subject (powering `queryStatuses` without replaying the log). |
-| `labels` | Signed atproto labels emitted by `modEventLabel`. Public-readable via `com.atproto.label.queryLabels`. |
+| `mod_report_resolution` | Links each `moderation_reports` row to the `mod_events` row that closed it. Auto-populated when a takedown / acknowledge / divert event is emitted. |
+| `labels` | Signed atproto labels emitted by `modEventLabel`. Public-readable via `com.atproto.label.queryLabels` / `subscribeLabels`. |
+| `ozone_settings` | Key/value/scope store for `tools.ozone.setting.*`. |
+| `ozone_sets` + `ozone_set_values` | Named subject sets for `tools.ozone.set.*`. |
+| `ozone_comm_templates` | Operator-to-user email templates; consumed by `modEventEmail` and queried via `tools.ozone.communication.*`. |
+| `verifications_index` | Per-(uri) verification grants issued by this labeler; mirrors the indexable dimensions of `app.bsky.graph.verification` records. |
+| `account_signatures` | Per-(did, property, value) fingerprint store for `tools.ozone.signature.*`. |
+| `safelink_rules` + `safelink_events` | URL-safety policy (block / warn / whitelist) per (url, pattern). |
 
 ## Bootstrap
 
