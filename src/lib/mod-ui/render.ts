@@ -9,6 +9,7 @@ import { escape } from '~/lib/admin-ui/render'
 const NAV_ITEMS = [
   { href: '/mod', label: 'Dashboard' },
   { href: '/mod/events', label: 'Events' },
+  { href: '/mod/labels', label: 'Labels' },
   { href: '/mod/team', label: 'Team' },
 ]
 
