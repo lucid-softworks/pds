@@ -50,7 +50,7 @@ The docs site is part of the app. Run it locally and read at
 | Backups | `pds:export` / `pds:import` CLIs | [23](./docs/23-backups.md) |
 | Ozone-shaped moderation | [`src/pds/mod/`](./src/pds/mod/) + `tools.ozone.moderation.*` + [`src/routes/mod/`](./src/routes/mod/) | [24](./docs/24-ozone-port.md) |
 
-**Implemented XRPC endpoints** (57 + 1 WebSocket subscription):
+**Implemented XRPC endpoints** (137 + 2 WebSocket subscriptions):
 
 | Namespace | Endpoints |
 | --- | --- |
@@ -66,6 +66,7 @@ The docs site is part of the app. Run it locally and read at
 | `com.atproto.admin.*` | getAccountInfo, getAccountInfos, updateAccountStatus, updateSubjectStatus, getSubjectStatus, updateAccountHandle, updateAccountEmail, updateAccountPassword, sendEmail, deleteAccount, disableAccountInvites, enableAccountInvites, disableInviteCodes, getInviteCodes, getAuditLog |
 | `com.atproto.moderation.*` | createReport |
 | `com.atproto.label.*` | queryLabels, subscribeLabels (WebSocket; signed labels from the bundled labeler) |
+| `com.atproto.temp.*` | fetchLabels (deprecated upstream; retained for older consumers) |
 | `tools.ozone.moderation.*` | emitEvent (16 event types), queryEvents, queryStatuses, getEvent, getRepo, getRecord, getRepos, getRecords, getSubjects, getAccountTimeline, getReporterStats, searchRepos, scheduleAction, listScheduledActions, cancelScheduledActions |
 | `tools.ozone.team.*` | listMembers, addMember, updateMember, deleteMember |
 | `tools.ozone.setting.*` | upsertOption, listOptions, removeOptions |
@@ -74,6 +75,9 @@ The docs site is part of the app. Run it locally and read at
 | `tools.ozone.verification.*` | grantVerifications, revokeVerifications, listVerifications |
 | `tools.ozone.signature.*` | searchAccounts, findRelatedAccounts, findCorrelation |
 | `tools.ozone.safelink.*` | addRule, updateRule, removeRule, queryRules, queryEvents |
+| `tools.ozone.queue.*` | createQueue, listQueues, updateQueue, deleteQueue, assignModerator, unassignModerator, getAssignments, routeReports |
+| `tools.ozone.report.*` | queryReports, getReport, getLatestReport, listActivities, createActivity, assignModerator, unassignModerator, reassignQueue, getAssignments, getLiveStats, getHistoricalStats, refreshStats |
+| `tools.ozone.server.*` | getConfig |
 | OAuth routes | `/oauth/par`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/jwks` |
 | `/.well-known/*` | `did.json`, `oauth-authorization-server` (RFC 8414), `oauth-protected-resource` (RFC 9728) |
 | Operations | `/metrics` (Prometheus), `/admin` (operator UI), `/mod` (moderator UI), `/app` (in-tree client), `/internal/tls-check` (Caddy on-demand-TLS ask gate) |
@@ -103,7 +107,8 @@ through, plus the operator surface for moderation and migration work.
 - ✅ Minimal client UI at `/app` (login, feed, compose, image upload)
 - ✅ Production ergonomics: `KeyWrapper` for at-rest signing keys, structured logger, `/metrics`, graceful shutdown
 - ✅ Backups (`pnpm pds:export` / `pds:import`) + benchmarking (`pds-bench`, `pds-stress`)
-- ✅ Bundled Ozone-shaped moderation: full `tools.ozone.*` XRPC surface (moderation + team + setting + set + communication + verification + signature + safelink — 33 endpoints), `com.atproto.label.queryLabels` + `subscribeLabels` (WebSocket), `/mod` operator UI, labeler DID-document service entry + `app.bsky.labeler.service` self-record auto-bootstrapped on team-lead signup, takedown enforcement on `repo.getRecord` / `listRecords` / `sync.getBlob` / `getRecord` / `getRepo` / `getBlocks`, 10 supported event types (incl. mute / divert / email with template support), per-report auto-resolution on closing events
+- ✅ Bundled Ozone-shaped moderation: full `tools.ozone.*` XRPC surface (moderation + team + setting + set + communication + verification + signature + safelink + queue + report + server — 54 endpoints), `com.atproto.label.queryLabels` + `subscribeLabels` (WebSocket), `/mod` operator UI, labeler DID-document service entry + `app.bsky.labeler.service` self-record auto-bootstrapped on team-lead signup, takedown enforcement on `repo.getRecord` / `listRecords` / `sync.getBlob` / `getRecord` / `getRepo` / `getBlocks`, 10 supported event types (incl. mute / divert / email with template support), per-report auto-resolution on closing events, operator-defined moderation queues with auto-routing
+- ✅ Read-after-write for proxied `app.bsky.*` reads: PDS reads the AppView's `atproto-repo-rev` response header, queries local records newer than that rev, and runs a per-NSID munge so freshly-written records appear in the response without waiting for AppView indexing (chapter 17). `getAuthorFeed` munge ships; infrastructure ready for the remaining endpoints (see `src/pds/read_after_write/README.md`)
 
 ## Try it
 

@@ -19,8 +19,11 @@ import { setupTestDbEnv, migrateProcessDb } from '../db'
 setupTestDbEnv()
 
 import { beforeAll, describe, expect, it } from 'vitest'
+import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core'
 import { db } from '~/lib/db'
 import { moderationReports } from '~/lib/db/schema'
+
+const pg = db as unknown as PgDatabase<PgQueryResultHKT>
 import { dispatch } from '~/pds/xrpc/server'
 import { registry } from '~/pds/xrpc/handlers'
 
@@ -158,7 +161,7 @@ describe('tools.ozone.queue.* + tools.ozone.report.*', () => {
   })
 
   it('seed a moderation report so routeReports + report endpoints have data', async () => {
-    const inserted = await db
+    const inserted = await pg
       .insert(moderationReports)
       .values({
         reportedByDid: 'did:plc:reporterXXX',

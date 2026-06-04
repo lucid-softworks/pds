@@ -23,14 +23,15 @@ on React, the router, or the docs UI. Each subdirectory matches a chapter in
 | Admin audit log | [`admin/`](./admin/) | ✅ DAG-CBOR `admin_audit` | [19](../../docs/19-moderation.md) |
 | Account migration | [`account/create.ts`](./account/create.ts) (migrating-in) + migration handlers | ✅ | [20](../../docs/20-migration.md) |
 | OAuth (AS + RS) | [`oauth/`](./oauth/) | ✅ PAR + PKCE + DPoP + JWKS | [21](../../docs/21-oauth.md) |
-| Ozone-shaped moderation | [`mod/`](./mod/) — team, events, requireModerator | ✅ emitEvent + queries + labels surface | [24](../../docs/24-ozone-port.md) |
+| Ozone-shaped moderation | [`mod/`](./mod/) — team, events, queues, reports, requireModerator | ✅ emitEvent + queries + labels surface + operator-defined queues + report management | [24](../../docs/24-ozone-port.md) |
+| Read-after-write proxy munge | [`read_after_write/`](./read_after_write/) | ✅ infrastructure + getAuthorFeed munge | [17](../../docs/17-pds-appview-relay.md) |
 
 ## XRPC endpoints
 
 Every XRPC handler lives under [`xrpc/handlers/`](./xrpc/handlers/) as a
 single file named after its NSID. The handler registry (one line per
 endpoint) is in [`xrpc/handlers/index.ts`](./xrpc/handlers/index.ts).
-Currently shipped (115):
+Currently shipped (138):
 
 ```
 ─── com.atproto.server.* ───────────────────────────────────────
@@ -60,6 +61,11 @@ updateAccountStatus  updateAccountHandle  updateAccountEmail
 sendEmail  deleteAccount  getAuditLog
 ─── app.bsky.actor.* (PDS-served slice of the bsky surface) ────
 getPreferences  putPreferences
+─── tools.ozone.*, com.atproto.label.*, com.atproto.temp.fetchLabels,
+    com.atproto.moderation.createReport ───────────────────────
+The full operator-moderation surface lives in mod/ — see mod/README.md
+for the per-namespace enumeration (54 endpoints + the public labels
+queries + the user-facing createReport).
 ```
 
 Anything *not* in this list, when called with an `Atproto-Proxy:
@@ -67,6 +73,12 @@ Anything *not* in this list, when called with an `Atproto-Proxy:
 with a freshly-minted ES256K service-auth JWT signed by the caller's
 repo key — see [`xrpc/proxy.ts`](./xrpc/proxy.ts) and chapter 17.
 Without the header, unknown NSIDs 404.
+
+For proxied `app.bsky.*` reads (`getAuthorFeed` and friends), the
+response is also run through the per-NSID munges in
+[`read_after_write/`](./read_after_write/) so locally-written records
+that the AppView hasn't yet indexed appear in the response — see
+chapter 17 for the contract.
 
 ## Dependency arrow
 
@@ -133,3 +145,5 @@ See the README in each subdirectory:
 - [`account/README.md`](./account/README.md)
 - [`admin/README.md`](./admin/README.md)
 - [`oauth/README.md`](./oauth/README.md)
+- [`mod/README.md`](./mod/README.md)
+- [`read_after_write/README.md`](./read_after_write/README.md)

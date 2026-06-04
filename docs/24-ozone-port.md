@@ -262,6 +262,75 @@ The event view is reconstructed from the DAG-CBOR snapshot
 `emitEvent` persisted, so the response shape matches exactly what the
 caller submitted — full fidelity round-trip.
 
+## Queues and report management
+
+The reference Ozone has two surfaces sitting on top of
+`moderation_reports`:
+
+- `tools.ozone.queue.*` (8 endpoints) — operator-defined buckets of
+  (subject-type, report-type, collection) routing rules. Created via
+  `createQueue`, listed/edited/deleted via the obvious CRUD verbs,
+  and populated by `routeReports({startReportId, endReportId})`
+  which matches each unrouted report's `(subjectType, reasonType,
+  collection)` against every enabled queue and writes the queue id.
+- `tools.ozone.report.*` (12 endpoints) — operator-side view of
+  reports as first-class objects. `queryReports` / `getReport` /
+  `getLatestReport` read, `assignModerator` / `unassignModerator` /
+  `reassignQueue` mutate the row, `listActivities` / `createActivity`
+  drive the append-only `mod_report_activities` log, and the stats
+  trio (`getLiveStats` / `getHistoricalStats` / `refreshStats`)
+  computes counters from SQL on every read (we don't cache; the
+  upstream Redis-backed counter rebuild has no analogue here).
+
+Backing schema:
+
+- `mod_queues(id, name UNIQUE, subject_types[], report_types[],
+  collection?, enabled, created_by, created_at, updated_at,
+  deleted_at)` — operator-defined queues. `deleteQueue` is a
+  soft-delete (sets `deleted_at` + `enabled=false`); the lexicon's
+  optional `migrateToQueueId` rewires `moderation_reports.queue_id`
+  in bulk before the queue is hidden.
+- `mod_queue_assignments(id, queue_id, did, start_at, end_at)` —
+  per-(queue, moderator) attachments. Open assignments have
+  `end_at IS NULL`; the queue UI shows the current roster of
+  moderators handling each queue.
+- `moderation_reports` gains `queue_id`, `assigned_to_did`,
+  `assigned_at` — populated by `routeReports` and the report-level
+  assignModerator handlers.
+- `mod_report_activities(id, report_id FK, activity_type ∈ {queue,
+  assignment, escalation, close, reopen, note}, previous_status,
+  internal_note, public_note, meta, is_automated, created_by,
+  created_at)` — append-only audit log per report; `previous_status`
+  captures the report's state at activity time so the UI can render
+  transitions.
+
+Status derivation for a report (`open` | `queued` | `assigned` |
+`closed` | `escalated`) comes from joining the row against
+`mod_report_resolution` and `mod_subject_status`:
+
+- assigned_to_did set → `assigned`
+- resolution row exists → `closed`
+- subject's `mod_subject_status.review_state` is
+  `reviewEscalated` → `escalated`
+- queue_id set → `queued`
+- otherwise → `open`
+
+No state column on `moderation_reports` itself — the derived value
+is canonical, the activities log is the audit trail.
+
+## tools.ozone.server.getConfig
+
+A single endpoint Ozone clients (the moderation UI) call on load to
+discover which features are available. We populate:
+
+- `pds.url` — `cfg.publicUrl`
+- `appview.url` — the canonical bsky.app AppView (`https://api.bsky.app`)
+- `viewer.role` — `roleAdmin` for admin Basic, `roleModerator` otherwise
+- `verifierDid` — the team-lead DID (the labeler this PDS hosts)
+
+`blobDivert` and `chat` are omitted: we don't run a blob-divert
+quarantine bucket and chat moderation isn't self-hostable.
+
 ## The labeler surface
 
 `com.atproto.label.queryLabels` is the *public* read endpoint.
@@ -423,9 +492,16 @@ Both are gated by `requireModerator`.
   These mirror what the firehose already emits as `#account` /
   `#identity` / `#commit` — we don't double-record into mod_events
   because the firehose log is already the canonical history.
-- (Closed — every `tools.ozone.*` surface now has a paired `/mod`
-  page: `labels`, `safelink`, `templates`, `verifications`, `sets`,
-  `settings`, `signatures`, `team`, `events`.)
+- **Chat moderation (`tools.ozone.chat.*`).** Four endpoints —
+  `getActorMetadata`, `getConvo`, `getConvoMembers`,
+  `getMessageContext`. We don't self-host chat, so the surface is
+  empty by design. The lexicons reach the AppView via proxy when a
+  caller targets `chat.bsky.team`.
+- (Closed — every operator-facing `tools.ozone.*` surface in the
+  upstream reference now has a paired `/mod` page or XRPC handler:
+  `labels`, `safelink`, `templates`, `verifications`, `sets`,
+  `settings`, `signatures`, `team`, `events`, `queues`, `reports`,
+  `server.getConfig`.)
 
 ## Exercises
 

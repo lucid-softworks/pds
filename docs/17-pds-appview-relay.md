@@ -340,6 +340,64 @@ through your PDS to the AppView/chat/Ozone service that knows the
 answer. The PDS stays the small, federated piece of the puzzle while
 clients enjoy the illusion of one URL.
 
+## Read-after-write
+
+The AppView's index is eventually-consistent. It's built by tailing
+the firehose, which means there's a window — typically under a
+second but sometimes longer under load — where you've written a
+record to your repo (`createRecord` returned 200), but the AppView
+hasn't yet ingested it from the firehose into its query index.
+
+Without intervention, the client experiences this as:
+
+1. User taps "Post" — `com.atproto.repo.createRecord` succeeds at 12:00:00.000.
+2. User pulls-to-refresh the timeline at 12:00:00.250.
+3. PDS proxies `app.bsky.feed.getAuthorFeed` to the AppView.
+4. AppView returns the feed *without* the new post — its index doesn't
+   know about it yet.
+5. Client renders an empty-ish feed; the user concludes the post failed.
+
+The PDS knows the truth — the record is in its `records` table the
+moment `createRecord` returns. So the PDS sits in the proxy path and
+*merges* it in. The hook is in [`src/pds/read_after_write/`](../src/pds/read_after_write/):
+
+1. The AppView includes an `atproto-repo-rev` response header
+   containing the rev of the user's repo its snapshot reflects.
+2. The proxy reads that header and queries our `records` table for
+   rows whose `rev > <that-header>`. (Migration 0026 added the per-
+   record `rev` column for this — `repo_blocks.repo_rev` already
+   existed for incremental `sync.getRepo`, but joining records →
+   blocks per request is more work than indexing it directly.)
+3. If any local records are newer, the proxy parses the AppView's
+   JSON response body and runs a per-NSID **munge** function that
+   merges them in.
+4. The merged JSON is what the client sees.
+
+Per-endpoint munges live in `src/pds/read_after_write/munges/`. The
+first one — `getAuthorFeed.ts` — prepends the requester's local
+posts to their own author feed (newest first, deduped against the
+AppView's own list). Other endpoints that need a similar merge:
+
+- `app.bsky.feed.getTimeline` — same merge logic, scoped to the
+  requester's home feed.
+- `app.bsky.feed.getPostThread` — replace stale parent / inject
+  local replies that the AppView hasn't yet hydrated.
+- `app.bsky.feed.getActorLikes` — inject local likes.
+- `app.bsky.actor.getProfile` / `getProfiles` — when the user
+  updated their profile record, the AppView may still serve the old
+  avatar/banner/displayName.
+- `app.bsky.feed.getFeed` — custom feeds; mostly pass-through, but
+  inject the requester's posts when they appear.
+
+The infrastructure handles parsing, the rev-window query, content-
+type sniffing, and best-effort error recovery (a munge that throws
+returns the original AppView body — better stale than broken). Each
+new munge is just the merge function — see the module's README for
+the contract.
+
+This mirrors upstream's `pipethroughReadAfterWrite` flow in shape,
+with the per-endpoint munges drawn from the lexicon's view types.
+
 ## Try it
 
 Once the sync endpoints are live, you can poke them directly. Spin up
