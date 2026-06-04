@@ -24,12 +24,18 @@ What ships here:
 
 Three categories, only the first two of which we can back up:
 
-1. **Postgres rows.** Sixteen tables across the schema files: accounts,
+1. **Postgres rows.** 31 tables across the schema files: accounts,
    repos, repo_blocks, records, blobs, record_blobs, refresh_tokens,
    plc_operations, repo_seq, app_passwords, email_tokens, invite_codes,
-   invite_code_uses, reserved_keys, oauth_par, oauth_codes. The
-   accounts table is the root — every other table either FKs to it or
-   stands alone (repo_seq, reserved_keys, oauth_par).
+   invite_code_uses, reserved_keys, oauth_par, oauth_codes — plus the
+   moderation surface (chapters 19 + 24): admin_audit,
+   moderation_reports, mod_team, mod_events, mod_subject_status,
+   mod_report_resolution, labels, ozone_settings, ozone_sets,
+   ozone_set_values, ozone_comm_templates, verifications_index,
+   account_signatures, safelink_rules, safelink_events. The
+   accounts table is the root — every other table either FKs to it,
+   to itself (mod_report_resolution → moderation_reports + mod_events;
+   ozone_set_values → ozone_sets), or stands alone.
 
 2. **Blob bytes.** Every uploaded image, video, and miscellaneous binary
    the user has attached to a record lives under `BLOB_DIR/<did>/<cid>.bin`

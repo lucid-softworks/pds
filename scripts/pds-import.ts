@@ -47,6 +47,21 @@ import {
   reservedKeys,
   oauthPar,
   oauthCodes,
+  adminAudit,
+  moderationReports,
+  modTeam,
+  modEvents,
+  modSubjectStatus,
+  modReportResolution,
+  labels,
+  ozoneSettings,
+  ozoneSets,
+  ozoneSetValues,
+  ozoneCommTemplates,
+  verificationsIndex,
+  accountSignatures,
+  safelinkRules,
+  safelinkEvents,
 } from '~/lib/db/schema'
 import { getConfig } from '~/lib/config'
 
@@ -75,6 +90,24 @@ const TABLES: Record<string, { _: { name: string } } & Record<string, unknown>> 
     reserved_keys: reservedKeys as never,
     oauth_par: oauthPar as never,
     oauth_codes: oauthCodes as never,
+    admin_audit: adminAudit as never,
+    moderation_reports: moderationReports as never,
+    mod_team: modTeam as never,
+    mod_events: modEvents as never,
+    mod_subject_status: modSubjectStatus as never,
+    // mod_report_resolution must come AFTER moderation_reports + mod_events
+    // (FK cascade)
+    mod_report_resolution: modReportResolution as never,
+    labels: labels as never,
+    ozone_settings: ozoneSettings as never,
+    ozone_sets: ozoneSets as never,
+    // ozone_set_values must come AFTER ozone_sets (FK cascade)
+    ozone_set_values: ozoneSetValues as never,
+    ozone_comm_templates: ozoneCommTemplates as never,
+    verifications_index: verificationsIndex as never,
+    account_signatures: accountSignatures as never,
+    safelink_rules: safelinkRules as never,
+    safelink_events: safelinkEvents as never,
   }
 const INSERT_ORDER = Object.keys(TABLES)
 
@@ -86,6 +119,17 @@ const INSERT_ORDER = Object.keys(TABLES)
 // the sequence past max(seq) once the table is loaded.
 const BIGSERIAL_SEQUENCES: Record<string, { col: string; seqName: string }> = {
   repo_seq: { col: 'seq', seqName: 'repo_seq_seq_seq' },
+  admin_audit: { col: 'id', seqName: 'admin_audit_id_seq' },
+  moderation_reports: { col: 'id', seqName: 'moderation_reports_id_seq' },
+  mod_events: { col: 'id', seqName: 'mod_events_id_seq' },
+  mod_subject_status: { col: 'id', seqName: 'mod_subject_status_id_seq' },
+  labels: { col: 'seq', seqName: 'labels_seq_seq' },
+  ozone_comm_templates: {
+    col: 'id',
+    seqName: 'ozone_comm_templates_id_seq',
+  },
+  account_signatures: { col: 'id', seqName: 'account_signatures_id_seq' },
+  safelink_events: { col: 'id', seqName: 'safelink_events_id_seq' },
 }
 
 type Manifest = {

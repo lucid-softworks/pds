@@ -43,6 +43,21 @@ import {
   reservedKeys,
   oauthPar,
   oauthCodes,
+  adminAudit,
+  moderationReports,
+  modTeam,
+  modEvents,
+  modSubjectStatus,
+  modReportResolution,
+  labels,
+  ozoneSettings,
+  ozoneSets,
+  ozoneSetValues,
+  ozoneCommTemplates,
+  verificationsIndex,
+  accountSignatures,
+  safelinkRules,
+  safelinkEvents,
 } from '~/lib/db/schema'
 import { getConfig } from '~/lib/config'
 
@@ -270,6 +285,181 @@ function buildSpecs(): TableSpec[] {
           .select()
           .from(oauthCodes)
           .orderBy(asc(oauthCodes.code))
+          .limit(l)
+          .offset(o),
+    },
+    // ─── moderation surface (chapters 19 + 24) ──────────────────────────
+    // Order constraint: moderation_reports + mod_events must come before
+    // mod_report_resolution (FK cascade points back at both).
+    {
+      name: 'admin_audit',
+      byteaCols: ['params'],
+      bigintCols: ['id'],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db.select().from(adminAudit).orderBy(asc(adminAudit.id)).limit(l).offset(o),
+    },
+    {
+      name: 'moderation_reports',
+      byteaCols: [],
+      bigintCols: ['id'],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(moderationReports)
+          .orderBy(asc(moderationReports.id))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'mod_team',
+      byteaCols: [],
+      bigintCols: [],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db.select().from(modTeam).orderBy(asc(modTeam.did)).limit(l).offset(o),
+    },
+    {
+      name: 'mod_events',
+      byteaCols: ['metadata'],
+      bigintCols: ['id'],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db.select().from(modEvents).orderBy(asc(modEvents.id)).limit(l).offset(o),
+    },
+    {
+      name: 'mod_subject_status',
+      byteaCols: [],
+      bigintCols: ['id', 'takedown_event_id'],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(modSubjectStatus)
+          .orderBy(asc(modSubjectStatus.id))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'mod_report_resolution',
+      byteaCols: [],
+      bigintCols: ['report_id', 'event_id'],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(modReportResolution)
+          .orderBy(asc(modReportResolution.reportId))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'labels',
+      byteaCols: ['sig'],
+      bigintCols: ['seq'],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db.select().from(labels).orderBy(asc(labels.seq)).limit(l).offset(o),
+    },
+    // ─── ozone-extension tables (chapter 24) ──────────────────────────────
+    // ozone_set_values must come after ozone_sets (FK cascade).
+    {
+      name: 'ozone_settings',
+      byteaCols: ['value'],
+      bigintCols: [],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(ozoneSettings)
+          .orderBy(asc(ozoneSettings.key), asc(ozoneSettings.scope))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'ozone_sets',
+      byteaCols: [],
+      bigintCols: [],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db.select().from(ozoneSets).orderBy(asc(ozoneSets.name)).limit(l).offset(o),
+    },
+    {
+      name: 'ozone_set_values',
+      byteaCols: [],
+      bigintCols: [],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(ozoneSetValues)
+          .orderBy(asc(ozoneSetValues.setName), asc(ozoneSetValues.value))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'ozone_comm_templates',
+      byteaCols: [],
+      bigintCols: ['id'],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(ozoneCommTemplates)
+          .orderBy(asc(ozoneCommTemplates.id))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'verifications_index',
+      byteaCols: [],
+      bigintCols: [],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(verificationsIndex)
+          .orderBy(asc(verificationsIndex.uri))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'account_signatures',
+      byteaCols: [],
+      bigintCols: ['id'],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(accountSignatures)
+          .orderBy(asc(accountSignatures.id))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'safelink_rules',
+      byteaCols: [],
+      bigintCols: [],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(safelinkRules)
+          .orderBy(asc(safelinkRules.url), asc(safelinkRules.pattern))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'safelink_events',
+      byteaCols: [],
+      bigintCols: ['id'],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(safelinkEvents)
+          .orderBy(asc(safelinkEvents.id))
           .limit(l)
           .offset(o),
     },
