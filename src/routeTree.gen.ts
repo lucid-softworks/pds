@@ -27,6 +27,9 @@ import { Route as ModVerificationsRouteImport } from './routes/mod/verifications
 import { Route as ModTemplatesRouteImport } from './routes/mod/templates'
 import { Route as ModTeamRouteImport } from './routes/mod/team'
 import { Route as ModSubjectRouteImport } from './routes/mod/subject'
+import { Route as ModSignaturesRouteImport } from './routes/mod/signatures'
+import { Route as ModSettingsRouteImport } from './routes/mod/settings'
+import { Route as ModSetsRouteImport } from './routes/mod/sets'
 import { Route as ModSafelinkRouteImport } from './routes/mod/safelink'
 import { Route as ModLogoutRouteImport } from './routes/mod/logout'
 import { Route as ModLoginRouteImport } from './routes/mod/login'
@@ -132,6 +135,21 @@ const ModSubjectRoute = ModSubjectRouteImport.update({
   path: '/mod/subject',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ModSignaturesRoute = ModSignaturesRouteImport.update({
+  id: '/mod/signatures',
+  path: '/mod/signatures',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModSettingsRoute = ModSettingsRouteImport.update({
+  id: '/mod/settings',
+  path: '/mod/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModSetsRoute = ModSetsRouteImport.update({
+  id: '/mod/sets',
+  path: '/mod/sets',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ModSafelinkRoute = ModSafelinkRouteImport.update({
   id: '/mod/safelink',
   path: '/mod/safelink',
@@ -223,6 +241,9 @@ export interface FileRoutesByFullPath {
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
   '/mod/safelink': typeof ModSafelinkRoute
+  '/mod/sets': typeof ModSetsRoute
+  '/mod/settings': typeof ModSettingsRoute
+  '/mod/signatures': typeof ModSignaturesRoute
   '/mod/subject': typeof ModSubjectRoute
   '/mod/team': typeof ModTeamRoute
   '/mod/templates': typeof ModTemplatesRoute
@@ -256,6 +277,9 @@ export interface FileRoutesByTo {
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
   '/mod/safelink': typeof ModSafelinkRoute
+  '/mod/sets': typeof ModSetsRoute
+  '/mod/settings': typeof ModSettingsRoute
+  '/mod/signatures': typeof ModSignaturesRoute
   '/mod/subject': typeof ModSubjectRoute
   '/mod/team': typeof ModTeamRoute
   '/mod/templates': typeof ModTemplatesRoute
@@ -291,6 +315,9 @@ export interface FileRoutesById {
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
   '/mod/safelink': typeof ModSafelinkRoute
+  '/mod/sets': typeof ModSetsRoute
+  '/mod/settings': typeof ModSettingsRoute
+  '/mod/signatures': typeof ModSignaturesRoute
   '/mod/subject': typeof ModSubjectRoute
   '/mod/team': typeof ModTeamRoute
   '/mod/templates': typeof ModTemplatesRoute
@@ -327,6 +354,9 @@ export interface FileRouteTypes {
     | '/mod/login'
     | '/mod/logout'
     | '/mod/safelink'
+    | '/mod/sets'
+    | '/mod/settings'
+    | '/mod/signatures'
     | '/mod/subject'
     | '/mod/team'
     | '/mod/templates'
@@ -360,6 +390,9 @@ export interface FileRouteTypes {
     | '/mod/login'
     | '/mod/logout'
     | '/mod/safelink'
+    | '/mod/sets'
+    | '/mod/settings'
+    | '/mod/signatures'
     | '/mod/subject'
     | '/mod/team'
     | '/mod/templates'
@@ -394,6 +427,9 @@ export interface FileRouteTypes {
     | '/mod/login'
     | '/mod/logout'
     | '/mod/safelink'
+    | '/mod/sets'
+    | '/mod/settings'
+    | '/mod/signatures'
     | '/mod/subject'
     | '/mod/team'
     | '/mod/templates'
@@ -427,6 +463,9 @@ export interface RootRouteChildren {
   ModLoginRoute: typeof ModLoginRoute
   ModLogoutRoute: typeof ModLogoutRoute
   ModSafelinkRoute: typeof ModSafelinkRoute
+  ModSetsRoute: typeof ModSetsRoute
+  ModSettingsRoute: typeof ModSettingsRoute
+  ModSignaturesRoute: typeof ModSignaturesRoute
   ModSubjectRoute: typeof ModSubjectRoute
   ModTeamRoute: typeof ModTeamRoute
   ModTemplatesRoute: typeof ModTemplatesRoute
@@ -570,6 +609,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ModSubjectRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mod/signatures': {
+      id: '/mod/signatures'
+      path: '/mod/signatures'
+      fullPath: '/mod/signatures'
+      preLoaderRoute: typeof ModSignaturesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/settings': {
+      id: '/mod/settings'
+      path: '/mod/settings'
+      fullPath: '/mod/settings'
+      preLoaderRoute: typeof ModSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/sets': {
+      id: '/mod/sets'
+      path: '/mod/sets'
+      fullPath: '/mod/sets'
+      preLoaderRoute: typeof ModSetsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/mod/safelink': {
       id: '/mod/safelink'
       path: '/mod/safelink'
@@ -704,6 +764,9 @@ const rootRouteChildren: RootRouteChildren = {
   ModLoginRoute: ModLoginRoute,
   ModLogoutRoute: ModLogoutRoute,
   ModSafelinkRoute: ModSafelinkRoute,
+  ModSetsRoute: ModSetsRoute,
+  ModSettingsRoute: ModSettingsRoute,
+  ModSignaturesRoute: ModSignaturesRoute,
   ModSubjectRoute: ModSubjectRoute,
   ModTeamRoute: ModTeamRoute,
   ModTemplatesRoute: ModTemplatesRoute,

@@ -13,6 +13,9 @@ const NAV_ITEMS = [
   { href: '/mod/safelink', label: 'Safelink' },
   { href: '/mod/templates', label: 'Templates' },
   { href: '/mod/verifications', label: 'Verifications' },
+  { href: '/mod/sets', label: 'Sets' },
+  { href: '/mod/settings', label: 'Settings' },
+  { href: '/mod/signatures', label: 'Signatures' },
   { href: '/mod/team', label: 'Team' },
 ]
 

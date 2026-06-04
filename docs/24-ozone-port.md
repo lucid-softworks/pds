@@ -258,6 +258,9 @@ mirroring `/admin`'s aesthetic.
 | `/mod/safelink` | URL safety rules — block / warn / whitelist — plus the audit-event log. |
 | `/mod/templates` | Communication templates consumed by `modEventEmail`. |
 | `/mod/verifications` | Issued verification grants + single-grant form. |
+| `/mod/sets` | Subject-set roster + per-set value editor. |
+| `/mod/settings` | Instance-scope operator config (JSON values + descriptions). |
+| `/mod/signatures` | Per-account fingerprint tagging + related-account research view. |
 | `/mod/team` | Roster + add/remove forms (lead-only mutations). |
 
 The session is a cookie-backed JWT scoped to `/mod`, separate from
@@ -374,11 +377,9 @@ Both are gated by `requireModerator`.
   pick them up as needed. The v1 cut covered the operationally
   meaningful subset (takedown / reverseTakedown / comment /
   acknowledge / escalate / label / mute / unmute / divert / email).
-- **No /mod UI yet for the `set.*` + `setting.*` + `signature.*`
-  XRPC surfaces.** They're driven entirely through XRPC — an upstream
-  Ozone web client already works against them — but our in-tree `/mod`
-  doesn't surface them yet. (`labels`, `safelink`, `templates`,
-  `verifications`, `team`, `events` all have UI.)
+- (Closed — every `tools.ozone.*` surface now has a paired `/mod`
+  page: `labels`, `safelink`, `templates`, `verifications`, `sets`,
+  `settings`, `signatures`, `team`, `events`.)
 
 ## Exercises
 
