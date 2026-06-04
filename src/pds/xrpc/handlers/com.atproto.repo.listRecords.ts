@@ -6,7 +6,7 @@
 // ascending; reverse=true flips it. The cursor is the last rkey of the
 // previous page.
 
-import { and, asc, desc, eq, gt, lt } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNull, lt } from 'drizzle-orm'
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest } from '../errors'
 import { db } from '~/lib/db'
@@ -29,7 +29,14 @@ const handler: Handler = async ({ params }) => {
   const cursor = params.cursor
 
   const did = await resolveRepoIdent(repo)
-  const where = [eq(records.repoDid, did), eq(records.collection, collection)]
+  const where = [
+    eq(records.repoDid, did),
+    eq(records.collection, collection),
+    // Takedown enforcement (chapter 24): drop takendown rows from the
+    // listing so moderators' decisions bite. They re-appear if the
+    // takedown is reversed.
+    isNull(records.takedownRef),
+  ]
   if (cursor) {
     where.push(reverse ? lt(records.rkey, cursor) : gt(records.rkey, cursor))
   }

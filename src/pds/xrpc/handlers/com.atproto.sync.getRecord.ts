@@ -9,11 +9,11 @@
 //
 // Returns a Response (binary); dispatcher must passthrough.
 
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest, NotFound } from '../errors'
 import { db } from '~/lib/db'
-import { repos } from '~/lib/db/schema'
+import { accounts, records, repos } from '~/lib/db/schema'
 import { parseCid } from '~/pds/codec'
 import { encodeCar, type CarBlock } from '~/pds/car/encode'
 import { getBlock } from '~/pds/repo/blockstore'
@@ -30,12 +30,47 @@ const handler: Handler = async ({ params }) => {
   if (!rkey) throw BadRequest('rkey parameter is required', 'InvalidRequest')
 
   const rows = await db
-    .select({ rootCid: repos.rootCid })
+    .select({
+      rootCid: repos.rootCid,
+      status: accounts.status,
+    })
     .from(repos)
+    .innerJoin(accounts, eq(accounts.did, repos.did))
     .where(eq(repos.did, did))
     .limit(1)
   const row = rows[0]
   if (!row) throw NotFound(`repo not found: ${did}`, 'RepoNotFound')
+  if (row.status === 'takendown') {
+    throw NotFound(`repo takendown: ${did}`, 'RepoTakendown')
+  }
+  if (row.status === 'deactivated') {
+    throw NotFound(`repo deactivated: ${did}`, 'RepoDeactivated')
+  }
+  if (row.status === 'deleted') {
+    throw NotFound(`repo deleted: ${did}`, 'RepoNotFound')
+  }
+
+  // Record-level takedown enforcement. Read the takedown_ref before
+  // walking the MST so we can short-circuit; the proof CIDs would
+  // resolve fine, but we don't want to serve the bytes once a
+  // moderator has flagged the row.
+  const recordRows = await db
+    .select({ takedownRef: records.takedownRef })
+    .from(records)
+    .where(
+      and(
+        eq(records.repoDid, did),
+        eq(records.collection, params.collection!.trim()),
+        eq(records.rkey, params.rkey!.trim()),
+      ),
+    )
+    .limit(1)
+  if (recordRows[0]?.takedownRef !== null && recordRows[0] !== undefined) {
+    throw NotFound(
+      `record not found: ${params.collection}/${params.rkey}`,
+      'RecordNotFound',
+    )
+  }
 
   // The optional `commit` param lets a caller pin a historical commit. We
   // accept it but verify it matches the head — historical commit retrieval

@@ -28,7 +28,7 @@ const handler: Handler = async ({ params }) => {
 
   const did = await resolveRepoIdent(repo)
   const rows = await db
-    .select({ cid: records.cid })
+    .select({ cid: records.cid, takedownRef: records.takedownRef })
     .from(records)
     .where(
       and(
@@ -41,6 +41,18 @@ const handler: Handler = async ({ params }) => {
   const row = rows[0]
   if (!row) {
     throw NotFound(`record not found: ${repo}/${collection}/${rkey}`, 'RecordNotFound')
+  }
+  // Takedown enforcement: once a moderator marks the row, its bytes
+  // stay in repo_blocks (the MST commit can't rewind without
+  // invalidating later commits' prev chain), but we stop serving it.
+  // Returning the RecordNotFound name matches what a consumer would
+  // see if the post had been deleted — the moderation decision is
+  // intentionally indistinguishable from a hard delete.
+  if (row.takedownRef !== null) {
+    throw NotFound(
+      `record not found: ${repo}/${collection}/${rkey}`,
+      'RecordNotFound',
+    )
   }
   if (pinnedCid && pinnedCid !== row.cid) {
     // Current record exists but isn't at the requested version. Treat as

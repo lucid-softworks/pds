@@ -11,7 +11,7 @@ import { eq } from 'drizzle-orm'
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest, NotFound } from '../errors'
 import { db } from '~/lib/db'
-import { repos } from '~/lib/db/schema'
+import { accounts, repos } from '~/lib/db/schema'
 import { parseCid } from '~/pds/codec'
 import { encodeCarChunks, type CarBlock } from '~/pds/car/encode'
 import { getBlock } from '~/pds/repo/blockstore'
@@ -22,12 +22,22 @@ const handler: Handler = async ({ params }) => {
   if (!did) throw BadRequest('did parameter is required', 'InvalidRequest')
 
   const rows = await db
-    .select({ rootCid: repos.rootCid })
+    .select({ rootCid: repos.rootCid, status: accounts.status })
     .from(repos)
+    .innerJoin(accounts, eq(accounts.did, repos.did))
     .where(eq(repos.did, did))
     .limit(1)
   const row = rows[0]
   if (!row) throw NotFound(`repo not found: ${did}`, 'RepoNotFound')
+  if (row.status === 'takendown') {
+    throw NotFound(`repo takendown: ${did}`, 'RepoTakendown')
+  }
+  if (row.status === 'deactivated') {
+    throw NotFound(`repo deactivated: ${did}`, 'RepoDeactivated')
+  }
+  if (row.status === 'deleted') {
+    throw NotFound(`repo deleted: ${did}`, 'RepoNotFound')
+  }
 
   const commitCid = parseCid(row.rootCid)
   // NOTE: `since=<rev>` is accepted by the lexicon but ignored here; serving

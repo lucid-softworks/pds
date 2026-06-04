@@ -25,12 +25,20 @@ const handler: Handler = async ({ params }) => {
       mimeType: blobs.mimeType,
       size: blobs.size,
       storeKey: blobs.storeKey,
+      takedownRef: blobs.takedownRef,
     })
     .from(blobs)
     .where(and(eq(blobs.cid, cid), eq(blobs.creator, did)))
     .limit(1)
   const row = rows[0]
   if (!row) throw NotFound('blob not found', 'BlobNotFound')
+  // Takedown enforcement (chapter 24): the bytes stay on disk so a
+  // reverseTakedown can restore them, but we stop serving while the
+  // ref is non-null. BlobNotFound matches the deletion shape — the
+  // moderation decision is opaque to the caller.
+  if (row.takedownRef !== null) {
+    throw NotFound('blob not found', 'BlobNotFound')
+  }
 
   const store = getBlobStore()
   const stream = await store.getStream(row.storeKey)

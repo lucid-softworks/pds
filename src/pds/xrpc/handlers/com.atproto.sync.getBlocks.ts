@@ -11,7 +11,7 @@ import { eq } from 'drizzle-orm'
 import type { Handler, HandlerDef } from '../server'
 import { BadRequest, NotFound } from '../errors'
 import { db } from '~/lib/db'
-import { repos } from '~/lib/db/schema'
+import { accounts, repos } from '~/lib/db/schema'
 import { encodeCar } from '~/pds/car/encode'
 import { getBlocks } from '~/pds/repo/blockstore'
 import { parseCidList } from '~/pds/repo/sync'
@@ -30,11 +30,21 @@ const handler: Handler = async ({ params, request }) => {
   const cids = parseCidList(cidStrings)
 
   const repoRow = await db
-    .select({ did: repos.did })
+    .select({ did: repos.did, status: accounts.status })
     .from(repos)
+    .innerJoin(accounts, eq(accounts.did, repos.did))
     .where(eq(repos.did, did))
     .limit(1)
   if (!repoRow[0]) throw NotFound(`repo not found: ${did}`, 'RepoNotFound')
+  if (repoRow[0].status === 'takendown') {
+    throw NotFound(`repo takendown: ${did}`, 'RepoTakendown')
+  }
+  if (repoRow[0].status === 'deactivated') {
+    throw NotFound(`repo deactivated: ${did}`, 'RepoDeactivated')
+  }
+  if (repoRow[0].status === 'deleted') {
+    throw NotFound(`repo deleted: ${did}`, 'RepoNotFound')
+  }
 
   const stored = await getBlocks(did, cids)
   // The CAR spec allows zero roots — but to keep firehose-style consumers
