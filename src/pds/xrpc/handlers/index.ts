@@ -85,6 +85,9 @@ import * as adminGetInviteCodes from './com.atproto.admin.getInviteCodes'
 import * as adminUpdateSubjectStatus from './com.atproto.admin.updateSubjectStatus'
 import * as adminGetSubjectStatus from './com.atproto.admin.getSubjectStatus'
 import * as adminUpdateAccountPassword from './com.atproto.admin.updateAccountPassword'
+// ozone-shaped moderation surface (chapter 24)
+import * as ozoneEmitEvent from './tools.ozone.moderation.emitEvent'
+import * as ozoneQueryEvents from './tools.ozone.moderation.queryEvents'
 // moderation
 import * as createReport from './com.atproto.moderation.createReport'
 // identity (migration-destination)
@@ -162,3 +165,5 @@ export const registry = new HandlerRegistry()
   .register(adminUpdateSubjectStatus.nsid, adminUpdateSubjectStatus.def)
   .register(adminGetSubjectStatus.nsid, adminGetSubjectStatus.def)
   .register(adminUpdateAccountPassword.nsid, adminUpdateAccountPassword.def)
+  .register(ozoneEmitEvent.nsid, ozoneEmitEvent.def)
+  .register(ozoneQueryEvents.nsid, ozoneQueryEvents.def)
