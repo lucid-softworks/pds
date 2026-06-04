@@ -28,6 +28,7 @@ import { Route as ModSubjectRouteImport } from './routes/mod/subject'
 import { Route as ModLogoutRouteImport } from './routes/mod/logout'
 import { Route as ModLoginRouteImport } from './routes/mod/login'
 import { Route as ModEventsRouteImport } from './routes/mod/events'
+import { Route as InternalTlsCheckRouteImport } from './routes/internal/tls-check'
 import { Route as DocsSlugRouteImport } from './routes/docs/$slug'
 import { Route as AppFeedRouteImport } from './routes/app/feed'
 import { Route as AppComposeRouteImport } from './routes/app/compose'
@@ -132,6 +133,11 @@ const ModEventsRoute = ModEventsRouteImport.update({
   path: '/mod/events',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InternalTlsCheckRoute = InternalTlsCheckRouteImport.update({
+  id: '/internal/tls-check',
+  path: '/internal/tls-check',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DocsSlugRoute = DocsSlugRouteImport.update({
   id: '/docs/$slug',
   path: '/docs/$slug',
@@ -187,6 +193,7 @@ export interface FileRoutesByFullPath {
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/internal/tls-check': typeof InternalTlsCheckRoute
   '/mod/events': typeof ModEventsRoute
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
@@ -215,6 +222,7 @@ export interface FileRoutesByTo {
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/internal/tls-check': typeof InternalTlsCheckRoute
   '/mod/events': typeof ModEventsRoute
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
@@ -245,6 +253,7 @@ export interface FileRoutesById {
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/internal/tls-check': typeof InternalTlsCheckRoute
   '/mod/events': typeof ModEventsRoute
   '/mod/login': typeof ModLoginRoute
   '/mod/logout': typeof ModLogoutRoute
@@ -276,6 +285,7 @@ export interface FileRouteTypes {
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
+    | '/internal/tls-check'
     | '/mod/events'
     | '/mod/login'
     | '/mod/logout'
@@ -304,6 +314,7 @@ export interface FileRouteTypes {
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
+    | '/internal/tls-check'
     | '/mod/events'
     | '/mod/login'
     | '/mod/logout'
@@ -333,6 +344,7 @@ export interface FileRouteTypes {
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
+    | '/internal/tls-check'
     | '/mod/events'
     | '/mod/login'
     | '/mod/logout'
@@ -361,6 +373,7 @@ export interface RootRouteChildren {
   AdminLogoutRoute: typeof AdminLogoutRoute
   AdminSignupsRoute: typeof AdminSignupsRoute
   DocsSlugRoute: typeof DocsSlugRoute
+  InternalTlsCheckRoute: typeof InternalTlsCheckRoute
   ModEventsRoute: typeof ModEventsRoute
   ModLoginRoute: typeof ModLoginRoute
   ModLogoutRoute: typeof ModLogoutRoute
@@ -512,6 +525,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ModEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/internal/tls-check': {
+      id: '/internal/tls-check'
+      path: '/internal/tls-check'
+      fullPath: '/internal/tls-check'
+      preLoaderRoute: typeof InternalTlsCheckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/docs/$slug': {
       id: '/docs/$slug'
       path: '/docs/$slug'
@@ -598,6 +618,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminLogoutRoute: AdminLogoutRoute,
   AdminSignupsRoute: AdminSignupsRoute,
   DocsSlugRoute: DocsSlugRoute,
+  InternalTlsCheckRoute: InternalTlsCheckRoute,
   ModEventsRoute: ModEventsRoute,
   ModLoginRoute: ModLoginRoute,
   ModLogoutRoute: ModLogoutRoute,

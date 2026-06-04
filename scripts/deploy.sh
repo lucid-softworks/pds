@@ -271,9 +271,28 @@ UNIT
 cat > /etc/caddy/Caddyfile <<CADDY
 {
     email ${ADMIN_EMAIL}
+    # Caddy will issue a Let's Encrypt cert for any hostname the PDS
+    # confirms is a real account. Without the ask gate, an attacker
+    # could trick LE into rate-limiting us by sending TLS ClientHellos
+    # for hostnames we don't own — the ask endpoint short-circuits
+    # before LE is contacted.
+    on_demand_tls {
+        ask http://127.0.0.1:3000/internal/tls-check
+    }
 }
 
+# Apex + admin handle: standard automatic TLS (HTTP-01).
 ${DOMAIN}, ${ADMIN_HANDLE} {
+    reverse_proxy 127.0.0.1:3000
+}
+
+# Every other <handle>.${DOMAIN} comes in here. Caddy hits the ask
+# endpoint, which returns 200 iff the PDS has an account whose handle
+# matches the SNI value — issues the cert only then.
+*.${DOMAIN} {
+    tls {
+        on_demand
+    }
     reverse_proxy 127.0.0.1:3000
 }
 CADDY

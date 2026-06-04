@@ -87,25 +87,58 @@ If your PDS issues handles like `alice.yourdomain.com`, the resolver step
 (`https://alice.yourdomain.com/.well-known/atproto-did`) needs to reach
 the PDS. Two options:
 
-1. **Wildcard DNS + wildcard TLS.** Point `*.yourdomain.com` at the PDS's
-   IP, issue a wildcard certificate (Let's Encrypt supports it via DNS-01
-   challenges). The PDS reads the `Host` header to figure out which
-   handle is being asked about and responds.
+1. **Wildcard DNS + per-handle on-demand TLS.** Point `*.yourdomain.com` at
+   the PDS's IP. For TLS, the cleanest pattern is Caddy's *on-demand TLS*:
+   Caddy fetches a per-handle Let's Encrypt cert the first time a TLS
+   handshake comes in for an unrecognised hostname, but only if a PDS-side
+   "ask" endpoint confirms the hostname is a real account.
+
+   The PDS ships that endpoint at `GET /internal/tls-check?domain=<host>`
+   — returns 200 if `accounts.handle == host` (and the account isn't
+   deleted), 404 otherwise. Caddy refuses to contact Let's Encrypt when
+   the answer isn't 200, so an attacker can't burn our LE rate budget by
+   spamming TLS ClientHellos for hostnames we don't own.
+
+   The shape we ship in `scripts/deploy.sh`:
+
+   ```caddy
+   {
+       email you@example.com
+       on_demand_tls {
+           ask http://127.0.0.1:3000/internal/tls-check
+       }
+   }
+
+   # Apex + admin handle: standard automatic TLS (HTTP-01).
+   yourdomain.com, you.yourdomain.com {
+       reverse_proxy 127.0.0.1:3000
+   }
+
+   # Every other <handle>.yourdomain.com: on-demand, gated by the
+   # ask endpoint above.
+   *.yourdomain.com {
+       tls { on_demand }
+       reverse_proxy 127.0.0.1:3000
+   }
+   ```
+
+   Wildcard *certificates* (the other route — one `*.yourdomain.com` cert
+   covering everyone) require LE's DNS-01 challenge, which needs API
+   credentials for your DNS provider. On-demand is the lighter lift.
+
 2. **`_atproto` DNS TXT records.** For users who own their own domain,
    skip the wildcard entirely and let them publish
    `_atproto.theirdomain.com TXT "did=did:plc:..."`. The PDS doesn't need
    to be reachable on `theirdomain.com`. This is how high-end accounts
    typically work (`pfrazee.com`, `bsky.app` itself, etc.).
 
-For the teaching port we punt on serving handles under our own domain:
-dev handles use the `.test` TLD which won't DNS-resolve. But we do
-implement **resolution of *other* people's handles** —
+We *also* implement **resolution of *other* people's handles** —
 `com.atproto.identity.resolveHandle` falls through to
 `src/pds/did/handle_resolver.ts`, which races a `_atproto.<handle>` DNS
 TXT lookup and a `https://<handle>/.well-known/atproto-did` HTTPS fetch,
 then does the bidirectional check against the resolved DID document's
-`alsoKnownAs`. That means clients can ask this PDS to resolve any
-handle on the network, not just the ones it hosts.
+`alsoKnownAs`. Clients can ask this PDS to resolve any handle on the
+network, not just the ones it hosts.
 
 ## PLC: directory or self-hosted
 
