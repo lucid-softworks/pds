@@ -467,6 +467,66 @@ want, use `updateAccountStatus` — *that* one's caught by every
 authenticated handler's `requireAccessAuth` and forbids the account from
 making more requests.
 
+## User-submitted reports: `com.atproto.moderation.createReport`
+
+Code: `src/pds/xrpc/handlers/com.atproto.moderation.createReport.ts`.
+
+This is the *user-facing* edge of moderation — the endpoint a Bluesky
+client hits when someone taps "Report this post". Anyone with an access
+token can submit one. The body carries a reason and a subject:
+
+```json
+{
+  "reasonType": "com.atproto.moderation.defs#reasonSpam",
+  "reason": "free-text, optional, up to 20 000 chars",
+  "subject": {
+    "$type": "com.atproto.repo.strongRef",
+    "uri": "at://did:plc:.../app.bsky.feed.post/abc",
+    "cid": "bafyre..."
+  }
+}
+```
+
+`subject` is one of:
+
+- `com.atproto.admin.defs#repoRef` — `{ did }`. Report a whole account.
+- `com.atproto.repo.strongRef` — `{ uri, cid }`. Report a specific record.
+
+The PDS is *not* a moderation authority. The reference PDS proxies
+every report to an upstream mod service via service-auth — the operator
+configures the service DID, the report-flow lands in a queue staffed
+by humans. We do the persist half locally (`moderation_reports`
+table) so:
+
+1. The operator console has a trail of what was reported from this PDS,
+   even when the upstream mod service is unreachable or unconfigured.
+2. The endpoint can mint a stable `id` and round-trip the lexicon's
+   reply shape (id, reasonType, reason, subject, reportedBy, createdAt)
+   on every call.
+
+The proxy half — forwarding to an upstream service via the existing
+`pds/auth/service_auth.ts` ES256K helper — isn't wired in this chapter.
+The shape is in place; an operator can add a `PDS_MOD_SERVICE_DID` env
+var and a few lines in the handler to fan out to it. See the exercises.
+
+`moderation_reports` schema (`drizzle/0013_moderation_reports.sql`):
+
+```
+id               bigserial PK
+reported_by_did  text NOT NULL
+reason_type      text NOT NULL
+reason           text
+subject_type     text NOT NULL
+subject_did      text       -- set for repoRef, null for strongRef
+subject_uri      text       -- set for strongRef, null for repoRef
+subject_cid      text       -- set for strongRef, null for repoRef
+created_at       timestamptz NOT NULL DEFAULT now()
+```
+
+Indexes: `created_at DESC` (operator console "recent reports") and
+`(reported_by_did, created_at DESC)` (per-reporter history — useful if
+the same account is filing many reports).
+
 ## Try it
 
 Set up the admin surface:
