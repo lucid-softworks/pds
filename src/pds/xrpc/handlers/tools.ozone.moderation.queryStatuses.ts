@@ -135,15 +135,27 @@ const handler: Handler = async ({ params, authorization }) => {
           : { $type: 'com.atproto.admin.defs#repoRef', did: r.subjectDid },
       reviewState:
         r.reviewState === 'open'
-          ? '#reviewOpen'
+          ? 'tools.ozone.moderation.defs#reviewOpen'
           : r.reviewState === 'escalated'
-            ? '#reviewEscalated'
+            ? 'tools.ozone.moderation.defs#reviewEscalated'
             : r.reviewState === 'acknowledged'
-              ? '#reviewClosed'
-              : '#reviewNone',
+              ? 'tools.ozone.moderation.defs#reviewClosed'
+              : 'tools.ozone.moderation.defs#reviewNone',
       takendown: r.takedownEventId !== null,
+      // Per the upstream subjectStatusView shape (chapter 24 cross-check):
+      //   createdAt   — first moderation event on this subject
+      //   updatedAt   — most recent event (was emitted as `lastReviewedAt`)
+      //   tags / priorityScore / appeal — set by their respective events
+      // We keep `lastReviewedAt` for backwards compat with the older shape.
+      createdAt: r.createdAt.toISOString(),
+      updatedAt: r.lastEventAt.toISOString(),
       lastReviewedAt: r.lastEventAt.toISOString(),
       ...(r.lastComment !== null ? { comment: r.lastComment } : {}),
+      ...(r.tags !== null && r.tags.length > 0 ? { tags: r.tags } : {}),
+      ...(r.priorityScore !== null
+        ? { priorityScore: r.priorityScore }
+        : {}),
+      ...(r.appealState !== null ? { appealed: r.appealState === 'resolved' } : {}),
     })),
   }
 }

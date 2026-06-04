@@ -1,9 +1,16 @@
 // Label subscription streaming — the read side of the `labels` table.
 //
-// Mirrors `src/pds/sequencer/firehose.ts` exactly in shape; the only
-// difference is the source rows (labels rather than repo_seq) and the
-// frame type names (`#labels` / `#info` from the canonical
-// `com.atproto.label.subscribeLabels` lexicon).
+// Mirrors `src/pds/sequencer/firehose.ts` in shape; the differences:
+//
+//   1. Source rows: `labels` instead of `repo_seq`.
+//   2. Frame `t` value: `#labels` / `#info` per the
+//      `com.atproto.label.subscribeLabels` lexicon.
+//   3. Push-on-insert: emitting a label via `applyEmitEvent` calls
+//      `notifyNewLabel()` exported from this module. The tail loop
+//      `await`s an internal promise that resolves the moment a new
+//      row lands, so latency is bounded by SQL round-trip rather
+//      than a poll interval. Matches the upstream Ozone's `Outbox`
+//      pattern (chapter 24 cross-check).
 //
 // The transport is supplied by the caller (WebSocket in the production
 // path, anything else in tests). We only know how to encode frames and
@@ -15,6 +22,26 @@ import { asc, gt } from 'drizzle-orm'
 import { db } from '~/lib/db'
 import { labels, type Label } from '~/lib/db/schema'
 import { encode } from '~/pds/codec'
+
+// One shared "a new label was inserted" channel for the whole process.
+// Subscribers wait on a Promise that resolves the next time the channel
+// fires; once resolved, the next call re-arms a fresh Promise so each
+// wake is single-fire. The pattern is small and avoids pulling in
+// node:events / EventEmitter for this one signal.
+let waiters: Array<() => void> = []
+function nextLabelTick(): Promise<void> {
+  return new Promise((resolve) => {
+    waiters.push(resolve)
+  })
+}
+
+/** Called by `applyEmitEvent`'s label-write path after the row lands.
+ *  Resolves every queued waiter so tail loops can re-query immediately. */
+export function notifyNewLabel(): void {
+  const queued = waiters
+  waiters = []
+  for (const w of queued) w()
+}
 
 export type LabelsClient = {
   bufferedFrames(): number
@@ -77,11 +104,21 @@ export async function streamLabels(opts: StreamOptions): Promise<void> {
     if (rows.length < batchSize) break
   }
 
-  // Tail phase.
+  // Tail phase — wait for the channel rather than polling. The
+  // `applyEmitEvent` label-write path calls `notifyNewLabel()` after
+  // the INSERT lands, so a subscriber wakes up on the next event-loop
+  // tick. We still re-query after each wake (the channel doesn't
+  // carry the new row) so race conditions between insert and notify
+  // can't drop a label.
+  //
+  // A safety-net poll runs every `pollIntervalMs` *in addition* to
+  // notify-driven wakes — guards against a notify lost to a process
+  // restart between insert and the notify call, or future cross-
+  // process inserts that this single-process channel doesn't see.
   while (!signal.aborted) {
     const rows = await readLabelsSince({ cursor, limit: batchSize })
     if (rows.length === 0) {
-      await sleep(pollIntervalMs, signal)
+      await Promise.race([nextLabelTick(), sleep(pollIntervalMs, signal)])
       continue
     }
     for (const row of rows) {

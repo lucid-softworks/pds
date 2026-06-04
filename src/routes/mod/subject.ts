@@ -105,6 +105,13 @@ export const Route = createFileRoute('/mod/subject')({
 
         const comment = trimmedOrNull(form.get('comment'))
         const labelVals = parseLabelVals(form.get('labels'))
+        const tagVals = parseLabelVals(form.get('tags'))
+        const priorityScoreRaw = trimmedOrNull(form.get('priorityScore'))
+        const priorityScore = priorityScoreRaw !== null
+          ? Number.parseInt(priorityScoreRaw, 10)
+          : null
+        const emailSubject = trimmedOrNull(form.get('emailSubject'))
+        const emailContent = trimmedOrNull(form.get('emailContent'))
 
         // Synthesise the emitEvent input shape from the form. createdBy
         // is the signed-in moderator's DID, or the team lead's DID when
@@ -115,7 +122,14 @@ export const Route = createFileRoute('/mod/subject')({
           : session.did
         if (!createdBy) return badRequest('createdBy unresolved')
 
-        const event = buildEventForAction(action, comment, labelVals)
+        const event = buildEventForAction(action, {
+          comment,
+          labelVals,
+          tagVals,
+          priorityScore,
+          emailSubject,
+          emailContent,
+        })
         if (!event) return badRequest(`unknown action: ${action}`)
 
         const input = EmitEventInputSchema.safeParse({
@@ -283,6 +297,9 @@ function subjectBody(
   <p class="muted">cid <code>${escape(s.cid)}</code></p>
 </header>`
 
+  const tags = view.status?.tags ?? []
+  const priorityScore = view.status?.priorityScore ?? null
+  const appealState = view.status?.appealState ?? null
   const stateRow = `
 <div class="grid grid-3">
   <div class="card">
@@ -296,6 +313,7 @@ function subjectBody(
     <div class="stat-label">Review state</div>
     <div class="stat-value" style="font-size: 1.25rem;">${escape(view.status?.reviewState ?? 'open')}</div>
     ${view.status?.lastEventAt ? `<div class="stat-sub">last event ${escape(formatRelativeTime(view.status.lastEventAt))}</div>` : ''}
+    ${appealState ? `<div class="stat-sub">appeal: ${escape(appealState)}</div>` : ''}
   </div>
   <div class="card">
     <div class="stat-label">Labels</div>
@@ -304,21 +322,53 @@ function subjectBody(
       ? `<div class="stat-sub">${view.labels.slice(0, 6).map((l) => `<span class="pill ${l.neg ? 'pill-warn' : 'pill-ok'}">${escape(l.val)}${l.neg ? ' (neg)' : ''}</span>`).join(' ')}</div>`
       : ''}
   </div>
-</div>`
+</div>
+${tags.length > 0 || priorityScore !== null
+  ? `<div class="grid grid-2" style="margin-top:1rem;">
+       ${tags.length > 0 ? `
+         <div class="card">
+           <div class="stat-label">Tags</div>
+           <div class="stat-sub" style="margin-top:0.5rem;">${tags.map((t) => `<span class="pill">${escape(t)}</span>`).join(' ')}</div>
+         </div>` : ''}
+       ${priorityScore !== null ? `
+         <div class="card">
+           <div class="stat-label">Priority</div>
+           <div class="stat-value" style="font-size:1.25rem;">${priorityScore}</div>
+           <div class="stat-sub">0..100</div>
+         </div>` : ''}
+     </div>`
+  : ''}`
 
+  const isAccount = s.kind === 'account'
   const actionForm = `
 <h2>Apply moderation action</h2>
-<form method="POST" action="/mod/subject" class="form">
+<form method="POST" action="/mod/subject" class="form" style="max-width:720px;">
   <input type="hidden" name="csrf" value="${escape(csrf)}">
   <input type="hidden" name="q" value="${escape(s.kind === 'account' ? s.did : s.uri)}">
   <label>
     <span>Comment (optional, recorded on the event)</span>
     <textarea name="comment" rows="2" placeholder="reason / note for the audit log"></textarea>
   </label>
-  <label>
-    <span>Labels (comma-separated; for create / negate actions)</span>
-    <input type="text" name="labels" placeholder="e.g. spam, !hide">
-  </label>
+  <div class="grid grid-2">
+    <label>
+      <span>Labels (comma-separated; for label / negate-labels)</span>
+      <input type="text" name="labels" placeholder="e.g. spam, !hide">
+    </label>
+    <label>
+      <span>Tags (comma-separated; for tag action)</span>
+      <input type="text" name="tags" placeholder="e.g. priority-review">
+    </label>
+    <label>
+      <span>Priority score (0..100; for priorityScore)</span>
+      <input type="number" name="priorityScore" min="0" max="100" placeholder="50">
+    </label>
+    ${isAccount ? `
+    <label>
+      <span>Email subject + body (for email)</span>
+      <input type="text" name="emailSubject" placeholder="subject line">
+      <textarea name="emailContent" rows="3" style="margin-top:0.25rem;" placeholder="content (markdown)"></textarea>
+    </label>` : ''}
+  </div>
   <div class="action-row">
     ${view.currentTakedownRef
       ? `<button type="submit" class="secondary" name="action" value="reverseTakedown">Reverse takedown</button>`
@@ -328,6 +378,16 @@ function subjectBody(
     <button type="submit" class="secondary" name="action" value="comment">Comment only</button>
     <button type="submit" class="secondary" name="action" value="label">Apply labels</button>
     <button type="submit" class="secondary" name="action" value="negate-labels">Negate labels</button>
+    <button type="submit" class="secondary" name="action" value="tag">Tag</button>
+    <button type="submit" class="secondary" name="action" value="priorityScore">Set priority</button>
+    <button type="submit" class="secondary" name="action" value="resolveAppeal">Resolve appeal</button>
+    ${isAccount ? `
+      <button type="submit" class="secondary" name="action" value="divert">Divert</button>
+      <button type="submit" class="secondary" name="action" value="email">Send email</button>
+      <button type="submit" class="secondary" name="action" value="muteReporter">Mute as reporter</button>
+      <button type="submit" class="secondary" name="action" value="unmuteReporter">Unmute as reporter</button>
+      <button type="submit" class="danger" name="action" value="revokeAccountCredentials" onclick="return confirm('Sign this account out of every device?');">Revoke credentials</button>
+    ` : ''}
   </div>
   ${role === 'admin' ? '<p class="muted" style="font-size: 12px;">acting as admin (Basic). createdBy will be set to the team lead.</p>' : ''}
 </form>`
@@ -393,11 +453,18 @@ function subjectNotFoundBody(q: string): string {
 
 function buildEventForAction(
   action: string,
-  comment: string | null,
-  labelVals: string[],
+  form: {
+    comment: string | null
+    labelVals: string[]
+    tagVals: string[]
+    priorityScore: number | null
+    emailSubject: string | null
+    emailContent: string | null
+  },
 ):
   | { $type: string; [k: string]: unknown }
   | null {
+  const { comment, labelVals, tagVals, priorityScore, emailSubject, emailContent } = form
   switch (action) {
     case 'takedown':
       return {
@@ -436,6 +503,55 @@ function buildEventForAction(
       return {
         $type: 'tools.ozone.moderation.defs#modEventLabel',
         negateLabelVals: labelVals,
+        ...(comment ? { comment } : {}),
+      }
+    case 'tag':
+      if (tagVals.length === 0) return null
+      return {
+        $type: 'tools.ozone.moderation.defs#modEventTag',
+        add: tagVals,
+        ...(comment ? { comment } : {}),
+      }
+    case 'priorityScore':
+      if (priorityScore === null || !Number.isFinite(priorityScore)) {
+        return null
+      }
+      return {
+        $type: 'tools.ozone.moderation.defs#modEventPriorityScore',
+        score: priorityScore,
+        ...(comment ? { comment } : {}),
+      }
+    case 'resolveAppeal':
+      return {
+        $type: 'tools.ozone.moderation.defs#modEventResolveAppeal',
+        ...(comment ? { comment } : {}),
+      }
+    case 'divert':
+      return {
+        $type: 'tools.ozone.moderation.defs#modEventDivert',
+        ...(comment ? { comment } : {}),
+      }
+    case 'muteReporter':
+      return {
+        $type: 'tools.ozone.moderation.defs#modEventMuteReporter',
+        ...(comment ? { comment } : {}),
+      }
+    case 'unmuteReporter':
+      return {
+        $type: 'tools.ozone.moderation.defs#modEventUnmuteReporter',
+        ...(comment ? { comment } : {}),
+      }
+    case 'email':
+      if (!emailSubject && !emailContent) return null
+      return {
+        $type: 'tools.ozone.moderation.defs#modEventEmail',
+        ...(emailSubject ? { subjectLine: emailSubject } : {}),
+        ...(emailContent ? { content: emailContent } : {}),
+        ...(comment ? { comment } : {}),
+      }
+    case 'revokeAccountCredentials':
+      return {
+        $type: 'tools.ozone.moderation.defs#revokeAccountCredentialsEvent',
         ...(comment ? { comment } : {}),
       }
     default:

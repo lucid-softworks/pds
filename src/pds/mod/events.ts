@@ -607,6 +607,10 @@ async function insertSignedLabel(args: {
     cts: now,
     sig,
   })
+  // Wake every subscribeLabels subscriber so the new row reaches them
+  // without the safety-net poll interval.
+  const { notifyNewLabel } = await import('~/pds/labels/subscribe')
+  notifyNewLabel()
 }
 
 async function resolveOpenReports(args: {
