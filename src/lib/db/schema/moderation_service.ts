@@ -187,3 +187,34 @@ export type ModReportResolution = typeof modReportResolution.$inferSelect
 export type NewModReportResolution = typeof modReportResolution.$inferInsert
 export type ModMutedReporter = typeof modMutedReporters.$inferSelect
 export type NewModMutedReporter = typeof modMutedReporters.$inferInsert
+
+// ─── mod_scheduled_actions ────────────────────────────────────────────────
+//
+// Deferred-execution moderation actions. The sweeper polls this table
+// and fires due rows by calling applyEmitEvent. Pending → completed /
+// cancelled / failed state machine.
+//
+// See chapter 24 — Ozone-shaped moderation (Scheduled actions).
+export const modScheduledActions = pgTable(
+  'mod_scheduled_actions',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    actionType: text('action_type').notNull(),
+    subjectDid: text('subject_did').notNull(),
+    firesAt: timestamp('fires_at', { withTimezone: true }).notNull(),
+    state: text('state').default('pending').notNull(),
+    payload: bytea('payload').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    firedAt: timestamp('fired_at', { withTimezone: true }),
+    failedReason: text('failed_reason'),
+  },
+  (t) => ({
+    subjectIdx: index('mod_scheduled_actions_subject_idx').on(t.subjectDid),
+  }),
+)
+
+export type ModScheduledAction = typeof modScheduledActions.$inferSelect
+export type NewModScheduledAction = typeof modScheduledActions.$inferInsert

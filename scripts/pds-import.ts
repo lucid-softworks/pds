@@ -54,6 +54,7 @@ import {
   modSubjectStatus,
   modMutedReporters,
   modReportResolution,
+  modScheduledActions,
   labels,
   ozoneSettings,
   ozoneSets,
@@ -97,6 +98,7 @@ const TABLES: Record<string, { _: { name: string } } & Record<string, unknown>> 
     mod_events: modEvents as never,
     mod_subject_status: modSubjectStatus as never,
     mod_muted_reporters: modMutedReporters as never,
+    mod_scheduled_actions: modScheduledActions as never,
     // mod_report_resolution must come AFTER moderation_reports + mod_events
     // (FK cascade)
     mod_report_resolution: modReportResolution as never,
@@ -132,6 +134,10 @@ const BIGSERIAL_SEQUENCES: Record<string, { col: string; seqName: string }> = {
   },
   account_signatures: { col: 'id', seqName: 'account_signatures_id_seq' },
   safelink_events: { col: 'id', seqName: 'safelink_events_id_seq' },
+  mod_scheduled_actions: {
+    col: 'id',
+    seqName: 'mod_scheduled_actions_id_seq',
+  },
 }
 
 type Manifest = {

@@ -35,6 +35,10 @@ import {
   startRetentionSweeps,
   stopRetentionSweeps,
 } from './src/pds/sequencer/retention'
+import {
+  startScheduledActionSweeps,
+  stopScheduledActionSweeps,
+} from './src/pds/mod/scheduled_actions'
 
 // We always start from the project root (the dev `tsx server.ts` command
 // and the systemd unit both Cwd at the repo root). Using `process.cwd()`
@@ -259,6 +263,10 @@ onShutdown('db', async () => {
 startRetentionSweeps()
 onShutdown('firehose-retention', async () => {
   stopRetentionSweeps()
+})
+startScheduledActionSweeps()
+onShutdown('mod-scheduled-actions', async () => {
+  stopScheduledActionSweeps()
 })
 onShutdown('http', async () => {
   await server.close()

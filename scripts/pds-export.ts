@@ -50,6 +50,7 @@ import {
   modSubjectStatus,
   modMutedReporters,
   modReportResolution,
+  modScheduledActions,
   labels,
   ozoneSettings,
   ozoneSets,
@@ -365,6 +366,19 @@ function buildSpecs(): TableSpec[] {
           .select()
           .from(modReportResolution)
           .orderBy(asc(modReportResolution.reportId))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'mod_scheduled_actions',
+      byteaCols: ['payload'],
+      bigintCols: ['id'],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(modScheduledActions)
+          .orderBy(asc(modScheduledActions.id))
           .limit(l)
           .offset(o),
     },

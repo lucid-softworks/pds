@@ -205,6 +205,30 @@ to "state changes."
    that DID (otherwise a moderator could impersonate the lead in the
    audit log).
 
+## Scheduled actions
+
+`tools.ozone.moderation.scheduleAction` accepts a takedown wrapped in
+a `schedulingConfig` (`executeAt` ISO timestamp, or `executeAfter`
+ISO-8601 duration). The handler writes one `mod_scheduled_actions`
+row per subject with `state='pending'`.
+
+A background sweep (`src/pds/mod/scheduled_actions.ts`) polls every
+30 seconds for rows whose `fires_at` has passed. For each due row it
+reconstructs the emitEvent input from the stored DAG-CBOR payload
+and calls `applyEmitEvent()` — same code path the live emitEvent
+handler uses, so side effects + cache update + auto-resolution all
+flow identically. State flips to `'completed'` on success or
+`'failed'` (with a reason) on apply error.
+
+`tools.ozone.moderation.cancelScheduledActions` flips `state` from
+`'pending'` to `'cancelled'`. Already-fired rows are untouched.
+`tools.ozone.moderation.listScheduledActions` paginates by id with
+optional filters on `states[]` and `subjects[]`.
+
+Sweep startup + shutdown is wired through the prod `server.ts`
+entry; in dev the sweep is dormant (we'd otherwise compete with the
+operator's manual triggers).
+
 ## queryEvents, queryStatuses, getEvent — the read surface
 
 Three XRPC handlers cover the read side:
@@ -378,12 +402,15 @@ Both are gated by `requireModerator`.
 
 ## Known gaps
 
-- **Scheduled takedowns + age-assurance event types.** Both need
-  scheduler infrastructure we don't ship (a background runner for
-  fire-on-future-date events, an age-attestation store). The
-  remaining passive event types — `accountEvent`, `identityEvent`,
-  `recordEvent` — overlap with what the firehose already emits, so
-  we don't double-record them.
+- **Age-assurance event types.** The `ageAssuranceEvent` /
+  `ageAssuranceOverrideEvent` / `ageAssurancePurgeEvent` family needs
+  an age-attestation store we don't ship — the surface lives in the
+  upstream Ozone primarily for KOSA-style compliance flows that the
+  reference operator (Bluesky) implements via a third-party vendor.
+- **Passive `accountEvent` / `identityEvent` / `recordEvent` types.**
+  These mirror what the firehose already emits as `#account` /
+  `#identity` / `#commit` — we don't double-record into mod_events
+  because the firehose log is already the canonical history.
 - (Closed — every `tools.ozone.*` surface now has a paired `/mod`
   page: `labels`, `safelink`, `templates`, `verifications`, `sets`,
   `settings`, `signatures`, `team`, `events`.)
