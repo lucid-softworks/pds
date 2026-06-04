@@ -15,6 +15,7 @@ import { requireRefreshAuth } from '~/pds/auth/middleware'
 import { createSessionTokens, assertAccountActive } from '~/pds/auth/session'
 import { buildDidDocument } from '~/pds/did/document'
 import { getConfig } from '~/lib/config'
+import { isLabelerDid } from '~/pds/mod/team'
 import { Unauthorized } from '../errors'
 
 const handler: Handler = async ({ authorization }) => {
@@ -42,6 +43,7 @@ const handler: Handler = async ({ authorization }) => {
     handle: acct.handle,
     signingKeyMultibase: acct.signingKeyPub,
     pdsEndpoint: getConfig().publicUrl,
+    isLabeler: await isLabelerDid(acct.did),
   })
 
   return {

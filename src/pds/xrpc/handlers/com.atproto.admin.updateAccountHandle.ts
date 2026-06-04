@@ -20,6 +20,7 @@ import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { requireAdmin } from '~/pds/auth/middleware'
 import { withAdminAudit } from '~/pds/admin/audit'
+import { clearModTeamCache } from '~/pds/mod/team'
 import { assertValidHandle, InvalidHandleError } from '~/pds/did/handle'
 import { emitIdentity } from '~/pds/sequencer/sequence'
 
@@ -71,6 +72,10 @@ const handler: Handler = withAdminAudit({
     throw err
   }
 
+  // Operator might have renamed an account into / out of the configured
+  // mod-team handle. Bust the lead cache so the next DID-doc render
+  // surfaces the labeler service entry correctly.
+  clearModTeamCache()
   await emitIdentity({ did, handle })
   return undefined
 })

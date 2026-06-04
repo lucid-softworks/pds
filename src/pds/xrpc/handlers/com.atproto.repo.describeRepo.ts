@@ -12,6 +12,7 @@ import { BadRequest, NotFound } from '../errors'
 import { db } from '~/lib/db'
 import { accounts, records } from '~/lib/db/schema'
 import { buildDidDocument } from '~/pds/did/document'
+import { isLabelerDid } from '~/pds/mod/team'
 import { getConfig } from '~/lib/config'
 import { resolveRepoIdent } from './_lib/resolveRepo'
 
@@ -43,6 +44,7 @@ const handler: Handler = async ({ params }) => {
     handle: acct.handle,
     signingKeyMultibase: acct.signingKeyPub,
     pdsEndpoint: getConfig().publicUrl,
+    isLabeler: await isLabelerDid(acct.did),
   })
 
   // handleIsCorrect tells the client whether the DID's resolved handle agrees

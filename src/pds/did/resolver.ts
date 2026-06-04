@@ -12,6 +12,7 @@ import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { getConfig } from '~/lib/config'
 import { buildDidDocument, type DidDocument } from './document'
+import { isLabelerDid } from '~/pds/mod/team'
 
 export async function resolveLocalDid(did: string): Promise<DidDocument | null> {
   const rows = await db
@@ -26,6 +27,7 @@ export async function resolveLocalDid(did: string): Promise<DidDocument | null> 
     handle: acct.handle,
     signingKeyMultibase: acct.signingKeyPub,
     pdsEndpoint: getConfig().publicUrl,
+    isLabeler: await isLabelerDid(acct.did),
   })
 }
 

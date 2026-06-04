@@ -12,6 +12,7 @@ import { BadRequest } from '../errors'
 import { loginWithPassword } from '~/pds/auth/session'
 import { buildDidDocument } from '~/pds/did/document'
 import { getConfig } from '~/lib/config'
+import { isLabelerDid } from '~/pds/mod/team'
 
 const InputSchema = z.object({
   identifier: z.string().min(1),
@@ -38,6 +39,7 @@ const handler: Handler = async ({ input }) => {
     handle: account.handle,
     signingKeyMultibase: account.signingKeyPub,
     pdsEndpoint: getConfig().publicUrl,
+    isLabeler: await isLabelerDid(account.did),
   })
 
   return {

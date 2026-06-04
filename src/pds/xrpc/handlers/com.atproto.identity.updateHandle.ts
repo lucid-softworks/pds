@@ -17,6 +17,7 @@ import { BadRequest, Conflict, InternalError } from '../errors'
 import { db } from '~/lib/db'
 import { accounts } from '~/lib/db/schema'
 import { requireAuthWithScope } from '~/pds/auth/middleware'
+import { clearModTeamCache } from '~/pds/mod/team'
 import {
   InvalidHandleError,
   assertValidHandle,
@@ -154,6 +155,11 @@ const handler: Handler = async ({ input, authorization, dpopProof, request }) =>
       throw err
     }
   }
+
+  // A rename might move this account into or out of the mod-team handle
+  // slot; bust the cached lead so subsequent DID-doc renders pick up
+  // the labeler-or-not flag correctly.
+  clearModTeamCache()
 
   // Best-effort #identity emission — the rotation is durable; firehose
   // outage shouldn't unwind the rename.

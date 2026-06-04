@@ -66,6 +66,15 @@ export async function isModerator(did: string): Promise<boolean> {
   return rows.length > 0
 }
 
+/** True when this DID is the labeler (team-lead). Used by DID-document
+ *  builders to add the `#atproto_labeler` service entry on the right
+ *  account and skip it everywhere else. Cheap: piggybacks on the
+ *  cached team-lead lookup. */
+export async function isLabelerDid(did: string): Promise<boolean> {
+  const lead = await getModTeamLead()
+  return lead?.did === did
+}
+
 /** Add a moderator to the team. `addedBy` is the operator who performed
  *  the action (an admin Basic call leaves this null). Idempotent: a
  *  second insert with the same DID is a no-op. */

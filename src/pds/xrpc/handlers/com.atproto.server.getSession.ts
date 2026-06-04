@@ -20,6 +20,7 @@ import { accounts } from '~/lib/db/schema'
 import { requireEitherAuth } from '~/pds/auth/middleware'
 import { buildDidDocument } from '~/pds/did/document'
 import { getConfig } from '~/lib/config'
+import { isLabelerDid } from '~/pds/mod/team'
 
 const handler: Handler = async ({ authorization, dpopProof, request }) => {
   const me = await requireEitherAuth({ authorization, dpopProof, request })
@@ -42,6 +43,7 @@ const handler: Handler = async ({ authorization, dpopProof, request }) => {
     handle: acct.handle,
     signingKeyMultibase: acct.signingKeyPub,
     pdsEndpoint: getConfig().publicUrl,
+    isLabeler: await isLabelerDid(acct.did),
   })
   return {
     did: acct.did,

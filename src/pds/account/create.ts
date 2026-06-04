@@ -43,6 +43,7 @@ import { hashPassword } from '~/pds/auth/password'
 import { createSessionTokens } from '~/pds/auth/session'
 import { emitIdentity, emitAccount } from '~/pds/sequencer/sequence'
 import { buildDidDocument, type DidDocument } from '~/pds/did/document'
+import { clearModTeamCache, isLabelerDid } from '~/pds/mod/team'
 import { BadRequest, Conflict, Unauthorized } from '~/pds/xrpc/errors'
 import { peekInviteCode, reserveInviteCode } from './invites'
 
@@ -171,11 +172,16 @@ export async function createAccount(
     // ── 8. Issue session ─────────────────────────────────────────────────
     const tokens = await createSessionTokens(did)
 
+    // A brand-new account might be the mod-team lead (operator creating
+    // `mod.<host>` for the first time). Bust the lead cache so the next
+    // resolver / DID-doc render sees the fresh row.
+    clearModTeamCache()
     const didDoc = buildDidDocument({
       did,
       handle: input.handle,
       signingKeyMultibase: signingKey.publicKeyMultibase,
       pdsEndpoint: cfg.publicUrl,
+      isLabeler: await isLabelerDid(did),
     })
 
     return {
@@ -316,11 +322,13 @@ async function createMigratingAccount(
 
     const tokens = await createSessionTokens(did)
 
+    clearModTeamCache()
     const didDoc = buildDidDocument({
       did,
       handle: input.handle,
       signingKeyMultibase: reserved.signingKeyPub,
       pdsEndpoint: cfg.publicUrl,
+      isLabeler: await isLabelerDid(did),
     })
 
     return {
