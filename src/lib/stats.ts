@@ -35,6 +35,13 @@ export type PdsStats = {
       tombstone: number
     }
   }
+  host: {
+    loadavg: [number, number, number]
+    cpus: number
+    memory: { used: number; total: number }
+    uptime: number
+    processRss: number
+  }
 }
 
 export function formatBytes(n: number): string {
@@ -46,4 +53,13 @@ export function formatBytes(n: number): string {
 
 export function formatCount(n: number): string {
   return n.toLocaleString('en-US')
+}
+
+export function formatDuration(seconds: number): string {
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
 }

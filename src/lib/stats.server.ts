@@ -4,6 +4,7 @@
 // handler. The matching pure-TS half (type + formatters) lives in
 // `./stats.ts` and is safe to import statically.
 
+import * as os from 'node:os'
 import { sql } from 'drizzle-orm'
 import { db } from '~/lib/db'
 import { accounts, blobs, records, repoSeq, repos } from '~/lib/db/schema'
@@ -80,5 +81,19 @@ export async function getPdsStats(): Promise<PdsStats> {
       latestSeq: Number(latestSeqRow?.seq ?? 0),
       eventCounts,
     },
+    host: getHostStats(),
+  }
+}
+
+function getHostStats(): PdsStats['host'] {
+  const load = os.loadavg()
+  const total = os.totalmem()
+  const free = os.freemem()
+  return {
+    loadavg: [load[0] ?? 0, load[1] ?? 0, load[2] ?? 0],
+    cpus: os.cpus().length,
+    memory: { used: total - free, total },
+    uptime: Math.floor(os.uptime()),
+    processRss: process.memoryUsage().rss,
   }
 }

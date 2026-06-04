@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { formatBytes, formatCount, type PdsStats } from '~/lib/stats'
+import { formatBytes, formatCount, formatDuration, type PdsStats } from '~/lib/stats'
 
 // `~/lib/stats.server` imports `~/lib/db` → postgres-js, which doesn't
 // browser-bundle. Dynamic-import inside the handler so it stays out of the
@@ -43,7 +43,7 @@ function HomePage() {
         </div>
       </header>
 
-      <section className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <section className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <StatCard label="Accounts" value={formatCount(stats.accounts.active)} sub={`${formatCount(stats.accounts.total)} total`}>
           <Breakdown
             items={[
@@ -76,6 +76,27 @@ function HomePage() {
               ['#tombstone', stats.firehose.eventCounts.tombstone],
             ]}
           />
+        </StatCard>
+
+        <StatCard
+          label="Host"
+          value={stats.host.loadavg[0].toFixed(2)}
+          sub={`load · ${stats.host.cpus} CPU${stats.host.cpus !== 1 ? 's' : ''} · up ${formatDuration(stats.host.uptime)}`}
+        >
+          <dl className="space-y-1 text-xs font-mono">
+            <div className="flex justify-between">
+              <dt className="text-[var(--color-fg-muted)]">memory</dt>
+              <dd className="tabular-nums">{formatBytes(stats.host.memory.used)} / {formatBytes(stats.host.memory.total)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-[var(--color-fg-muted)]">process</dt>
+              <dd className="tabular-nums">{formatBytes(stats.host.processRss)} rss</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-[var(--color-fg-muted)]">load 5/15m</dt>
+              <dd className="tabular-nums">{stats.host.loadavg[1].toFixed(2)} / {stats.host.loadavg[2].toFixed(2)}</dd>
+            </div>
+          </dl>
         </StatCard>
       </section>
 
