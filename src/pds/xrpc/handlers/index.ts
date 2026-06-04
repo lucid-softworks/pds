@@ -116,6 +116,14 @@ import * as ozoneCommList from './tools.ozone.communication.listTemplates'
 import * as ozoneVerifyGrant from './tools.ozone.verification.grantVerifications'
 import * as ozoneVerifyRevoke from './tools.ozone.verification.revokeVerifications'
 import * as ozoneVerifyList from './tools.ozone.verification.listVerifications'
+import * as ozoneSigSearch from './tools.ozone.signature.searchAccounts'
+import * as ozoneSigRelated from './tools.ozone.signature.findRelatedAccounts'
+import * as ozoneSigCorr from './tools.ozone.signature.findCorrelation'
+import * as ozoneSafelinkAdd from './tools.ozone.safelink.addRule'
+import * as ozoneSafelinkUpdate from './tools.ozone.safelink.updateRule'
+import * as ozoneSafelinkRemove from './tools.ozone.safelink.removeRule'
+import * as ozoneSafelinkQueryRules from './tools.ozone.safelink.queryRules'
+import * as ozoneSafelinkQueryEvents from './tools.ozone.safelink.queryEvents'
 // moderation
 import * as createReport from './com.atproto.moderation.createReport'
 // identity (migration-destination)
@@ -221,3 +229,11 @@ export const registry = new HandlerRegistry()
   .register(ozoneVerifyGrant.nsid, ozoneVerifyGrant.def)
   .register(ozoneVerifyRevoke.nsid, ozoneVerifyRevoke.def)
   .register(ozoneVerifyList.nsid, ozoneVerifyList.def)
+  .register(ozoneSigSearch.nsid, ozoneSigSearch.def)
+  .register(ozoneSigRelated.nsid, ozoneSigRelated.def)
+  .register(ozoneSigCorr.nsid, ozoneSigCorr.def)
+  .register(ozoneSafelinkAdd.nsid, ozoneSafelinkAdd.def)
+  .register(ozoneSafelinkUpdate.nsid, ozoneSafelinkUpdate.def)
+  .register(ozoneSafelinkRemove.nsid, ozoneSafelinkRemove.def)
+  .register(ozoneSafelinkQueryRules.nsid, ozoneSafelinkQueryRules.def)
+  .register(ozoneSafelinkQueryEvents.nsid, ozoneSafelinkQueryEvents.def)

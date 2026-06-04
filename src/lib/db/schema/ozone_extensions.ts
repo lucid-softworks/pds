@@ -137,3 +137,84 @@ export type OzoneCommTemplate = typeof ozoneCommTemplates.$inferSelect
 export type NewOzoneCommTemplate = typeof ozoneCommTemplates.$inferInsert
 export type VerificationIndex = typeof verificationsIndex.$inferSelect
 export type NewVerificationIndex = typeof verificationsIndex.$inferInsert
+
+// ─── account_signatures ───────────────────────────────────────────────────
+//
+// Per-(did, property, value) fingerprint store for the signature.*
+// surface. Operators populate this manually (or via a future scraper);
+// the signature endpoints query it to find sock-puppets / related
+// accounts.
+export const accountSignatures = pgTable(
+  'account_signatures',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    did: text('did').notNull(),
+    property: text('property').notNull(),
+    value: text('value').notNull(),
+    notedAt: timestamp('noted_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    notedBy: text('noted_by'),
+  },
+  (t) => ({
+    didIdx: index('account_signatures_did_idx').on(t.did),
+    valueIdx: index('account_signatures_value_idx').on(t.property, t.value),
+  }),
+)
+
+// ─── safelink_rules ───────────────────────────────────────────────────────
+//
+// Current URL-safety policy. PK is (url, pattern); a single URL can
+// have separate domain-pattern and url-pattern entries (e.g. block
+// the whole domain but whitelist one path).
+export const safelinkRules = pgTable(
+  'safelink_rules',
+  {
+    url: text('url').notNull(),
+    pattern: text('pattern').notNull(),
+    action: text('action').notNull(),
+    reason: text('reason').notNull(),
+    comment: text('comment'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastUpdatedBy: text('last_updated_by'),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.url, t.pattern] }),
+  }),
+)
+
+// ─── safelink_events ──────────────────────────────────────────────────────
+//
+// Append-only audit log of every rule change.
+export const safelinkEvents = pgTable(
+  'safelink_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    eventType: text('event_type').notNull(),
+    url: text('url').notNull(),
+    pattern: text('pattern').notNull(),
+    action: text('action'),
+    reason: text('reason'),
+    comment: text('comment'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdBy: text('created_by'),
+  },
+  (t) => ({
+    createdIdx: index('safelink_events_created_at_idx').on(t.createdAt),
+    urlIdx: index('safelink_events_url_idx').on(t.url, t.createdAt),
+  }),
+)
+
+export type AccountSignature = typeof accountSignatures.$inferSelect
+export type NewAccountSignature = typeof accountSignatures.$inferInsert
+export type SafelinkRule = typeof safelinkRules.$inferSelect
+export type NewSafelinkRule = typeof safelinkRules.$inferInsert
+export type SafelinkEvent = typeof safelinkEvents.$inferSelect
+export type NewSafelinkEvent = typeof safelinkEvents.$inferInsert
