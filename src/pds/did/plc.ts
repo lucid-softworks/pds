@@ -46,6 +46,11 @@ export type GenesisInput = {
   rotationKeyDidKey: string
   signingKeyDidKey: string
   pdsEndpoint: string
+  /** When true, the genesis op also advertises `#atproto_labeler`.
+   *  Used by the team-lead signup path (`PDS_MOD_TEAM_HANDLE`) so a
+   *  fresh team lead lands on the network as a labeler in one
+   *  publish — no follow-up rotation needed. */
+  includeLabeler?: boolean
 }
 
 export type GenesisResult = {
@@ -62,17 +67,24 @@ export type GenesisResult = {
 export async function buildGenesisPlc(
   input: GenesisInput,
 ): Promise<GenesisResult & { signedBlock: { cid: string; bytes: Uint8Array } }> {
+  const services: UnsignedPlcOp['services'] = {
+    atproto_pds: {
+      type: 'AtprotoPersonalDataServer',
+      endpoint: input.pdsEndpoint,
+    },
+  }
+  if (input.includeLabeler) {
+    services.atproto_labeler = {
+      type: 'AtprotoLabeler',
+      endpoint: input.pdsEndpoint,
+    }
+  }
   const unsigned: UnsignedPlcOp = {
     type: 'plc_operation',
     rotationKeys: [input.rotationKeyDidKey],
     verificationMethods: { atproto: input.signingKeyDidKey },
     alsoKnownAs: [`at://${input.handle}`],
-    services: {
-      atproto_pds: {
-        type: 'AtprotoPersonalDataServer',
-        endpoint: input.pdsEndpoint,
-      },
-    },
+    services,
     prev: null,
   }
 

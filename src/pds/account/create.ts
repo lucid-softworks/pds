@@ -110,12 +110,19 @@ export async function createAccount(
   //      the accounts row is in — plc_operations.did has an immediate FK to
   //      accounts.did and would otherwise reject. The op is signed and the
   //      DID is final at this point regardless of when it gets persisted.
+  // If this signup is for the configured moderation-team lead account
+  // (`PDS_MOD_TEAM_HANDLE`), advertise `#atproto_labeler` right in the
+  // genesis op so plc.directory + the network see the labeler service
+  // entry from minute one — no follow-up rotation needed.
+  const isLeadSignup =
+    input.handle.toLowerCase() === cfg.modTeamHandle.toLowerCase()
   const plc = await buildGenesisPlc({
     handle: input.handle,
     rotationKeyPriv: rotationKey.privateKeyHex,
     rotationKeyDidKey: rotationKey.didKey,
     signingKeyDidKey: signingKey.didKey,
     pdsEndpoint: cfg.publicUrl,
+    includeLabeler: isLeadSignup,
   })
   const did = plc.did
 
@@ -163,6 +170,32 @@ export async function createAccount(
       did,
       signingKeyPriv: signingKey.privateKeyHex,
     })
+
+    // ── 7a. Team-lead signup → publish the app.bsky.labeler.service
+    //        self-record now, while we're still in the signup transaction.
+    //        Pairs with `includeLabeler: true` on the genesis op above: the
+    //        DID-doc service entry tells *who* is a labeler, this record
+    //        tells *what* labels they offer. Together they make
+    //        bsky.app/labeler.getServices light up without any follow-up
+    //        moderator action.
+    if (isLeadSignup) {
+      const { applyWrites } = await import('~/pds/repo/writes')
+      await applyWrites({
+        did,
+        writes: [
+          {
+            action: 'create',
+            collection: 'app.bsky.labeler.service',
+            rkey: 'self',
+            value: {
+              $type: 'app.bsky.labeler.service',
+              policies: { labelValues: [] },
+              createdAt: new Date().toISOString(),
+            },
+          },
+        ],
+      })
+    }
 
     // ── 7b. Announce the account on the firehose. Identity then account so
     //        consumers see the handle binding before they see status.

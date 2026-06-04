@@ -50,8 +50,29 @@ schema, separate UI, separate auth gate) but share the runtime.
 
 The moderation surface is "owned" by one atproto account on this PDS,
 configurable via `PDS_MOD_TEAM_HANDLE` (default `mod.<hostname>`).
-The operator creates that account through the normal signup flow —
-nothing special is needed. Once it exists, five things happen on the
+The operator creates that account through the normal signup flow.
+Detection is a single string comparison inside `createAccount`:
+`input.handle === cfg.modTeamHandle`. Every other handle takes the
+plain account path; only this single configured handle gets the
+labeler treatment.
+
+Two phases of bootstrap exist, optimised for the common case:
+
+**Eager (signup-time)** — when `createAccount` itself sees the lead
+handle, the genesis PLC op is built with `#atproto_labeler` already
+included and the `app.bsky.labeler.service` record is written
+*inside the signup transaction*, before the firehose `#identity` /
+`#account` events fire. By the time `createAccount` returns, the
+network's first view of the DID is "labeler + PDS" — no follow-up
+operations, no second plc.directory call.
+
+**Lazy (post-signup)** — for the rarer cases where an account
+*becomes* the lead after signup (operator renames an existing
+account into the configured handle, or changes
+`PDS_MOD_TEAM_HANDLE` to point at an existing account), the same
+checks run lazily inside `getModTeamLead()`. Each routine
+(`ensureLeadRow`, `ensureLeadLabelerService`, `ensureLeadLabelerRecord`)
+is idempotent, so they self-heal on first mod-surface read. Once it exists, five things happen on the
 next `getModTeamLead()` call (lazy, cached for the process lifetime):
 
 1. **A row in `mod_team`** with `role='lead'` is auto-seeded.
