@@ -44,11 +44,18 @@ Destination side:
   below.
 - `com.atproto.repo.importRepo` — new. Takes the CAR the user downloaded
   from the source and ingests it as the destination repo's state.
-- `com.atproto.sync.listMissingBlobs` — new. Reports the blob CIDs the
+- `com.atproto.repo.listMissingBlobs` — new. Reports the blob CIDs the
   imported records reference but the destination blob store doesn't have
   bytes for yet.
 - `com.atproto.repo.uploadBlob` — chapter 15. The user POSTs each missing
   blob in turn.
+- `com.atproto.identity.getRecommendedDidCredentials` — new. The
+  destination's "if you rotated your DID to point here, here's exactly
+  what it should say" payload. Consumed by `signPlcOperation` on the
+  source side to construct a rotation op.
+- `com.atproto.identity.submitPlcOperation` — new. Destination accepts
+  the signed rotation op, validates it points at this PDS, and POSTs
+  to plc.directory.
 - `com.atproto.server.activateAccount` — chapter 12. Flips the new
   account to `active` once everything has landed.
 
@@ -115,7 +122,7 @@ her client follows:
    The destination verifies the commit signature against the reserved
    signing key, persists every block, rebuilds the records + record_blobs
    indexes, and emits a `#commit` firehose event.
-9. **Reconcile blobs.** `GET /xrpc/com.atproto.sync.listMissingBlobs`. For
+9. **Reconcile blobs.** `GET /xrpc/com.atproto.repo.listMissingBlobs`. For
    each `{ cid, recordUri }` it returns, Alice's client downloads the
    blob from the source PDS (`com.atproto.sync.getBlob`, presenting the
    step-2 token) and uploads it to the destination
@@ -210,7 +217,7 @@ The handler's path is short:
    at 60s; we pass the explicit `unsafeLongLived: true` opt-in to
    stretch to 60 minutes. `lxm` is intentionally absent — the
    destination uses this single token for `sync.getRepo` *plus* the
-   `sync.getBlob` / `sync.listMissingBlobs` reconciliation loop, so
+   `sync.getBlob` / `repo.listMissingBlobs` reconciliation loop, so
    pinning it to one method would force a re-mint every step.
 5. **Emit `#account { active: false, status: 'deactivated' }`.** Best-effort:
    a sequencer outage shouldn't unwind the migration_state flip. The
@@ -429,9 +436,78 @@ Errors:
   doesn't match the caller, or the signature doesn't verify.
 - `RepoNotEmpty` — destination already has records.
 
-### `com.atproto.sync.listMissingBlobs`
+### `com.atproto.identity.getRecommendedDidCredentials`
 
-Code: `src/pds/xrpc/handlers/com.atproto.sync.listMissingBlobs.ts`.
+Code: `src/pds/xrpc/handlers/com.atproto.identity.getRecommendedDidCredentials.ts`.
+
+GET, requires access auth. No params.
+
+Output:
+
+```json
+{
+  "alsoKnownAs": ["at://<handle>"],
+  "verificationMethods": { "atproto": "<signing key did:key>" },
+  "rotationKeys": ["<rotation key did:key>"],
+  "services": {
+    "atproto_pds": {
+      "type": "AtprotoPersonalDataServer",
+      "endpoint": "https://<this-pds>"
+    }
+  }
+}
+```
+
+"If you were going to rotate your DID document to point at *this* PDS,
+here's exactly what it should say." The migrating user calls this on
+the destination after `createAccount` lands their account row, then
+hands the payload to `signPlcOperation` (typically on the old PDS,
+which still holds the rotation key) to construct the rotation op.
+
+We read the verification + rotation keys straight off `accounts` —
+they were generated at signup (or supplied during the migrating-in
+`createAccount` path) and are durable for the life of the account.
+`alsoKnownAs` is `at://<current handle>`. `services.atproto_pds.endpoint`
+is whatever `PDS_PUBLIC_URL` says today, so a rebrand-by-CNAME on the
+PDS side flows through correctly.
+
+### `com.atproto.identity.submitPlcOperation`
+
+Code: `src/pds/xrpc/handlers/com.atproto.identity.submitPlcOperation.ts`.
+
+POST, requires access auth. Body: `{ operation: <signed PLC op> }`.
+
+The caller hands in a *signed* op (built by `signPlcOperation`
+elsewhere — typically on the source PDS, while they still hold the
+rotation key). This endpoint validates that the op correctly points at
+us, persists it to `plc_operations`, POSTs it to plc.directory, and
+emits `#identity` on the firehose. After the directory accepts, the
+world starts resolving the DID to this PDS.
+
+We're strict about what the op may contain. All of these have to
+match exactly, or we reject with `InvalidRequest`:
+
+- `rotationKeys` must include the rotation key from `accounts`
+- `services.atproto_pds.type` must be `AtprotoPersonalDataServer`
+- `services.atproto_pds.endpoint` must equal `getConfig().publicUrl`
+- `verificationMethods.atproto` must equal the signing key from `accounts`
+- `alsoKnownAs[0]` must be `at://<accounts.handle>`
+
+The error strings match the reference PDS's so a Bluesky client gets
+the familiar message. The strictness is on purpose: a user who pushes
+an op that points at a *different* PDS would brick the migration —
+plc.directory would accept it, our local DID resolver would still say
+"yes that's us" until cache TTL, and the firehose `#identity` event
+would contradict reality.
+
+Local-PLC mode (`PDS_LOCAL_PLC=true`, the dev default) skips the
+plc.directory POST — `publishPlcOp` returns immediately. The local
+row in `plc_operations` is still written so a same-PDS double-act
+test can drive the full flow without an external directory.
+
+### `com.atproto.repo.listMissingBlobs`
+
+Code: `src/pds/xrpc/handlers/com.atproto.repo.listMissingBlobs.ts`.
 
 GET, requires access auth. Query: `?limit=500&cursor=<cid>`.
 
@@ -708,7 +784,7 @@ curl -s -X POST http://localhost:3000/xrpc/com.atproto.repo.importRepo \
   --data-binary @/tmp/alice.car
 
 # 9. (Destination) Listed missing blobs (empty for the simple case).
-curl -s http://localhost:3000/xrpc/com.atproto.sync.listMissingBlobs \
+curl -s http://localhost:3000/xrpc/com.atproto.repo.listMissingBlobs \
   -H "Authorization: Bearer $DEST_JWT" | jq
 
 # 10. (Destination) Activate.

@@ -61,7 +61,7 @@ import * as subscribeRepos from './com.atproto.sync.subscribeRepos'
 import * as getServiceAuth from './com.atproto.server.getServiceAuth'
 import * as reserveSigningKey from './com.atproto.server.reserveSigningKey'
 import * as importRepo from './com.atproto.repo.importRepo'
-import * as listMissingBlobs from './com.atproto.sync.listMissingBlobs'
+import * as listMissingBlobs from './com.atproto.repo.listMissingBlobs'
 import * as requestAccountMigrate from './com.atproto.server.requestAccountMigrate'
 // bsky-app preferences (PDS-served despite the app.bsky.* namespace)
 import * as bskyGetPreferences from './app.bsky.actor.getPreferences'
@@ -75,6 +75,11 @@ import * as adminUpdateAccountEmail from './com.atproto.admin.updateAccountEmail
 import * as adminSendEmail from './com.atproto.admin.sendEmail'
 import * as adminDeleteAccount from './com.atproto.admin.deleteAccount'
 import * as adminGetAuditLog from './com.atproto.admin.getAuditLog'
+// moderation
+import * as createReport from './com.atproto.moderation.createReport'
+// identity (migration-destination)
+import * as getRecommendedDidCredentials from './com.atproto.identity.getRecommendedDidCredentials'
+import * as submitPlcOperation from './com.atproto.identity.submitPlcOperation'
 
 export const registry = new HandlerRegistry()
   .register(createAccount.nsid, createAccount.def)
@@ -136,3 +141,6 @@ export const registry = new HandlerRegistry()
   .register(adminSendEmail.nsid, adminSendEmail.def)
   .register(adminDeleteAccount.nsid, adminDeleteAccount.def)
   .register(adminGetAuditLog.nsid, adminGetAuditLog.def)
+  .register(createReport.nsid, createReport.def)
+  .register(getRecommendedDidCredentials.nsid, getRecommendedDidCredentials.def)
+  .register(submitPlcOperation.nsid, submitPlcOperation.def)
