@@ -5,6 +5,7 @@ import {
   bigint,
   boolean,
   integer,
+  jsonb,
   timestamp,
   index,
 } from 'drizzle-orm/pg-core'
@@ -218,3 +219,89 @@ export const modScheduledActions = pgTable(
 
 export type ModScheduledAction = typeof modScheduledActions.$inferSelect
 export type NewModScheduledAction = typeof modScheduledActions.$inferInsert
+
+// ─── mod_queues ───────────────────────────────────────────────────────────
+//
+// Operator-defined moderation queues. Each queue is a named bucket of
+// (subject-type, report-type) routing rules. `tools.ozone.queue.routeReports`
+// auto-routes new reports to whichever enabled queue matches.
+//
+// See chapter 24 — Ozone-shaped moderation (Queues).
+export const modQueues = pgTable(
+  'mod_queues',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    name: text('name').notNull().unique(),
+    description: text('description'),
+    subjectTypes: text('subject_types').array().notNull(),
+    reportTypes: text('report_types').array().notNull(),
+    collection: text('collection'),
+    enabled: boolean('enabled').default(true).notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => ({
+    enabledIdx: index('mod_queues_enabled_idx').on(t.enabled),
+  }),
+)
+
+export const modQueueAssignments = pgTable(
+  'mod_queue_assignments',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    queueId: bigint('queue_id', { mode: 'number' }).notNull(),
+    did: text('did').notNull(),
+    startAt: timestamp('start_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    endAt: timestamp('end_at', { withTimezone: true }),
+  },
+  (t) => ({
+    queueIdx: index('mod_queue_assignments_queue_idx').on(t.queueId, t.endAt),
+    didIdx: index('mod_queue_assignments_did_idx').on(t.did, t.endAt),
+  }),
+)
+
+export type ModQueue = typeof modQueues.$inferSelect
+export type NewModQueue = typeof modQueues.$inferInsert
+export type ModQueueAssignment = typeof modQueueAssignments.$inferSelect
+export type NewModQueueAssignment = typeof modQueueAssignments.$inferInsert
+
+// ─── mod_report_activities ────────────────────────────────────────────────
+//
+// Append-only activity log per `moderation_reports` row. Drives the
+// `tools.ozone.report.*` surface (createActivity / listActivities).
+// activity_type ∈ {queue, assignment, escalation, close, reopen, note}.
+// previous_status captures the report's status at activity time so the
+// timeline shows transitions.
+//
+// See chapter 24 — Ozone-shaped moderation (Reports).
+export const modReportActivities = pgTable(
+  'mod_report_activities',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    reportId: bigint('report_id', { mode: 'number' }).notNull(),
+    activityType: text('activity_type').notNull(),
+    previousStatus: text('previous_status'),
+    internalNote: text('internal_note'),
+    publicNote: text('public_note'),
+    meta: jsonb('meta'),
+    isAutomated: boolean('is_automated').default(false).notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    reportIdx: index('mod_report_activities_report_idx').on(t.reportId, t.id),
+  }),
+)
+
+export type ModReportActivity = typeof modReportActivities.$inferSelect
+export type NewModReportActivity = typeof modReportActivities.$inferInsert

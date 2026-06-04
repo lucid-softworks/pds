@@ -342,10 +342,11 @@ async function persistCommit(handle: WriteHandle, args: PersistArgs): Promise<vo
           collection: op.collection,
           rkey: op.rkey,
           cid: op.cid,
+          rev: args.newRev,
         })
         .onConflictDoUpdate({
           target: [records.repoDid, records.collection, records.rkey],
-          set: { cid: op.cid, indexedAt: new Date() },
+          set: { cid: op.cid, indexedAt: new Date(), rev: args.newRev },
         })
     } else {
       await handle

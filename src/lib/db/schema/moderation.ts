@@ -2,6 +2,7 @@ import {
   pgTable,
   text,
   bigserial,
+  bigint,
   timestamp,
   index,
 } from 'drizzle-orm/pg-core'
@@ -33,11 +34,19 @@ export const moderationReports = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    queueId: bigint('queue_id', { mode: 'number' }),
+    assignedToDid: text('assigned_to_did'),
+    assignedAt: timestamp('assigned_at', { withTimezone: true }),
   },
   (t) => ({
     createdIdx: index('moderation_reports_created_idx').on(t.createdAt),
     reporterIdx: index('moderation_reports_reporter_idx').on(
       t.reportedByDid,
+      t.createdAt,
+    ),
+    queueIdx: index('moderation_reports_queue_idx').on(t.queueId, t.createdAt),
+    assigneeIdx: index('moderation_reports_assignee_idx').on(
+      t.assignedToDid,
       t.createdAt,
     ),
   }),

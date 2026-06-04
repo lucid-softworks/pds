@@ -37,6 +37,11 @@ export const records = pgTable(
     // we only stop serving it from `repo.getRecord` and friends. See
     // chapter 19 — Moderation.
     takedownRef: text('takedown_ref'),
+    // Commit rev (TID) at which this record-row last changed. Powers
+    // read-after-write: the proxy compares this against the AppView's
+    // `atproto-repo-rev` response header to find records that need
+    // merging into proxied responses. See chapter 17.
+    rev: text('rev'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.repoDid, t.collection, t.rkey] }),
@@ -45,6 +50,7 @@ export const records = pgTable(
       t.collection,
     ),
     cidIdx: index('records_cid_idx').on(t.cid),
+    revIdx: index('records_repo_rev_idx').on(t.repoDid, t.rev),
   }),
 )
 

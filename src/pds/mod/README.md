@@ -32,7 +32,11 @@ narrative; this file is the in-tree map.
 | `tools.ozone.verification.*` | grantVerifications · revokeVerifications · listVerifications |
 | `tools.ozone.signature.*` | searchAccounts · findRelatedAccounts · findCorrelation |
 | `tools.ozone.safelink.*` | addRule · updateRule · removeRule · queryRules · queryEvents |
+| `tools.ozone.queue.*` | createQueue · listQueues · updateQueue · deleteQueue · assignModerator · unassignModerator · getAssignments · routeReports |
+| `tools.ozone.report.*` | queryReports · getReport · getLatestReport · listActivities · createActivity · assignModerator · unassignModerator · reassignQueue · getAssignments · getLiveStats · getHistoricalStats · refreshStats |
+| `tools.ozone.server.*` | getConfig |
 | `com.atproto.label.*` | queryLabels · subscribeLabels (WebSocket) |
+| `com.atproto.temp.*` | fetchLabels (deprecated upstream; retained for older clients) |
 | `com.atproto.moderation.*` | createReport |
 
 ## Schema
@@ -55,6 +59,8 @@ Lives in `../../lib/db/schema/moderation_service.ts` and
 | `verifications_index` | Per-(uri) verification grants issued by this labeler; mirrors the indexable dimensions of `app.bsky.graph.verification` records. |
 | `account_signatures` | Per-(did, property, value) fingerprint store for `tools.ozone.signature.*`. |
 | `safelink_rules` + `safelink_events` | URL-safety policy (block / warn / whitelist) per (url, pattern). |
+| `mod_queues` + `mod_queue_assignments` | Operator-defined moderation queues + per-(queue, moderator) assignments. Powers `tools.ozone.queue.*`. |
+| `mod_report_activities` | Append-only activity log per `moderation_reports` row. Six activity types (queue / assignment / escalation / close / reopen / note) drive `tools.ozone.report.*`. |
 
 ## Bootstrap
 

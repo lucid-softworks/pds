@@ -34,6 +34,7 @@ import * as createInviteCode from './com.atproto.server.createInviteCode'
 import * as createInviteCodes from './com.atproto.server.createInviteCodes'
 import * as getAccountInviteCodes from './com.atproto.server.getAccountInviteCodes'
 import * as checkSignupQueue from './com.atproto.temp.checkSignupQueue'
+import * as tempFetchLabels from './com.atproto.temp.fetchLabels'
 // identity
 import * as resolveHandle from './com.atproto.identity.resolveHandle'
 import * as updateHandle from './com.atproto.identity.updateHandle'
@@ -133,6 +134,27 @@ import * as ozoneSafelinkUpdate from './tools.ozone.safelink.updateRule'
 import * as ozoneSafelinkRemove from './tools.ozone.safelink.removeRule'
 import * as ozoneSafelinkQueryRules from './tools.ozone.safelink.queryRules'
 import * as ozoneSafelinkQueryEvents from './tools.ozone.safelink.queryEvents'
+import * as ozoneServerGetConfig from './tools.ozone.server.getConfig'
+import * as ozoneQueueCreate from './tools.ozone.queue.createQueue'
+import * as ozoneQueueList from './tools.ozone.queue.listQueues'
+import * as ozoneQueueUpdate from './tools.ozone.queue.updateQueue'
+import * as ozoneQueueDelete from './tools.ozone.queue.deleteQueue'
+import * as ozoneQueueAssign from './tools.ozone.queue.assignModerator'
+import * as ozoneQueueUnassign from './tools.ozone.queue.unassignModerator'
+import * as ozoneQueueGetAssignments from './tools.ozone.queue.getAssignments'
+import * as ozoneQueueRoute from './tools.ozone.queue.routeReports'
+import * as ozoneReportQuery from './tools.ozone.report.queryReports'
+import * as ozoneReportGet from './tools.ozone.report.getReport'
+import * as ozoneReportLatest from './tools.ozone.report.getLatestReport'
+import * as ozoneReportListActs from './tools.ozone.report.listActivities'
+import * as ozoneReportCreateAct from './tools.ozone.report.createActivity'
+import * as ozoneReportAssign from './tools.ozone.report.assignModerator'
+import * as ozoneReportUnassign from './tools.ozone.report.unassignModerator'
+import * as ozoneReportReassign from './tools.ozone.report.reassignQueue'
+import * as ozoneReportGetAssigns from './tools.ozone.report.getAssignments'
+import * as ozoneReportLive from './tools.ozone.report.getLiveStats'
+import * as ozoneReportHist from './tools.ozone.report.getHistoricalStats'
+import * as ozoneReportRefresh from './tools.ozone.report.refreshStats'
 // moderation
 import * as createReport from './com.atproto.moderation.createReport'
 // identity (migration-destination)
@@ -164,6 +186,7 @@ export const registry = new HandlerRegistry()
   .register(createInviteCodes.nsid, createInviteCodes.def)
   .register(getAccountInviteCodes.nsid, getAccountInviteCodes.def)
   .register(checkSignupQueue.nsid, checkSignupQueue.def)
+  .register(tempFetchLabels.nsid, tempFetchLabels.def)
   .register(resolveHandle.nsid, resolveHandle.def)
   .register(updateHandle.nsid, updateHandle.def)
   .register(requestPlcOperationSignature.nsid, requestPlcOperationSignature.def)
@@ -255,3 +278,24 @@ export const registry = new HandlerRegistry()
   .register(ozoneSafelinkRemove.nsid, ozoneSafelinkRemove.def)
   .register(ozoneSafelinkQueryRules.nsid, ozoneSafelinkQueryRules.def)
   .register(ozoneSafelinkQueryEvents.nsid, ozoneSafelinkQueryEvents.def)
+  .register(ozoneServerGetConfig.nsid, ozoneServerGetConfig.def)
+  .register(ozoneQueueCreate.nsid, ozoneQueueCreate.def)
+  .register(ozoneQueueList.nsid, ozoneQueueList.def)
+  .register(ozoneQueueUpdate.nsid, ozoneQueueUpdate.def)
+  .register(ozoneQueueDelete.nsid, ozoneQueueDelete.def)
+  .register(ozoneQueueAssign.nsid, ozoneQueueAssign.def)
+  .register(ozoneQueueUnassign.nsid, ozoneQueueUnassign.def)
+  .register(ozoneQueueGetAssignments.nsid, ozoneQueueGetAssignments.def)
+  .register(ozoneQueueRoute.nsid, ozoneQueueRoute.def)
+  .register(ozoneReportQuery.nsid, ozoneReportQuery.def)
+  .register(ozoneReportGet.nsid, ozoneReportGet.def)
+  .register(ozoneReportLatest.nsid, ozoneReportLatest.def)
+  .register(ozoneReportListActs.nsid, ozoneReportListActs.def)
+  .register(ozoneReportCreateAct.nsid, ozoneReportCreateAct.def)
+  .register(ozoneReportAssign.nsid, ozoneReportAssign.def)
+  .register(ozoneReportUnassign.nsid, ozoneReportUnassign.def)
+  .register(ozoneReportReassign.nsid, ozoneReportReassign.def)
+  .register(ozoneReportGetAssigns.nsid, ozoneReportGetAssigns.def)
+  .register(ozoneReportLive.nsid, ozoneReportLive.def)
+  .register(ozoneReportHist.nsid, ozoneReportHist.def)
+  .register(ozoneReportRefresh.nsid, ozoneReportRefresh.def)

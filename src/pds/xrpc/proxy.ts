@@ -34,7 +34,26 @@ import { accounts } from '~/lib/db/schema'
 import { resolveDid } from '~/pds/did/resolver'
 import { getKeyWrapper } from '~/pds/auth/key_wrap'
 import { mintServiceAuthWithKey } from '~/pds/auth/service_auth'
+import { applyReadAfterWrite } from '~/pds/read_after_write'
+import { getAuthorFeedMunge, type AuthorFeedResponse } from '~/pds/read_after_write/munges/getAuthorFeed'
 import { BadRequest, NotFound, InternalError, Unauthorized } from './errors'
+
+/** NSIDs whose proxied response benefits from read-after-write — the
+ *  AppView's snapshot might be stale relative to the user's own writes,
+ *  and we merge in the missing records before returning. */
+const READ_AFTER_WRITE_MUNGES: Record<
+  string,
+  (
+    res: Response,
+    requester: string,
+  ) => Promise<Response>
+> = {
+  'app.bsky.feed.getAuthorFeed': (res, requester) =>
+    applyReadAfterWrite<AuthorFeedResponse>(res, {
+      requester,
+      munge: getAuthorFeedMunge,
+    }),
+}
 
 /** Headers we strip when forwarding upstream. `host`, `connection`,
  *  `content-length`, etc. would be wrong for the new request; the auth
@@ -220,9 +239,26 @@ export async function dispatchViaProxy(args: {
     encodeURIComponent(args.nsid) +
     url.search
 
-  return await proxyForward({
+  const upstreamRes = await proxyForward({
     upstreamUrl,
     request: args.request,
     serviceAuth,
   })
+
+  // Read-after-write hook: if this NSID has a registered munge, run the
+  // AppView's response through it so the user's recent local writes
+  // appear in the response.
+  const munger = READ_AFTER_WRITE_MUNGES[args.nsid]
+  if (munger && upstreamRes.status === 200) {
+    try {
+      return await munger(upstreamRes, args.callerDid)
+    } catch {
+      // Munge failed — best-effort: return upstream as-is. The original
+      // response body was already consumed by `applyReadAfterWrite`'s
+      // text() call, but on error it returns the unparsed text in a
+      // fresh Response, so the client still gets a valid body.
+      return upstreamRes
+    }
+  }
+  return upstreamRes
 }
