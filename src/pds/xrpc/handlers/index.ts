@@ -109,6 +109,13 @@ import * as ozoneSetQuery from './tools.ozone.set.querySets'
 import * as ozoneSetGetValues from './tools.ozone.set.getValues'
 import * as ozoneSetAddValues from './tools.ozone.set.addValues'
 import * as ozoneSetDeleteValues from './tools.ozone.set.deleteValues'
+import * as ozoneCommCreate from './tools.ozone.communication.createTemplate'
+import * as ozoneCommUpdate from './tools.ozone.communication.updateTemplate'
+import * as ozoneCommDelete from './tools.ozone.communication.deleteTemplate'
+import * as ozoneCommList from './tools.ozone.communication.listTemplates'
+import * as ozoneVerifyGrant from './tools.ozone.verification.grantVerifications'
+import * as ozoneVerifyRevoke from './tools.ozone.verification.revokeVerifications'
+import * as ozoneVerifyList from './tools.ozone.verification.listVerifications'
 // moderation
 import * as createReport from './com.atproto.moderation.createReport'
 // identity (migration-destination)
@@ -207,3 +214,10 @@ export const registry = new HandlerRegistry()
   .register(ozoneSetGetValues.nsid, ozoneSetGetValues.def)
   .register(ozoneSetAddValues.nsid, ozoneSetAddValues.def)
   .register(ozoneSetDeleteValues.nsid, ozoneSetDeleteValues.def)
+  .register(ozoneCommCreate.nsid, ozoneCommCreate.def)
+  .register(ozoneCommUpdate.nsid, ozoneCommUpdate.def)
+  .register(ozoneCommDelete.nsid, ozoneCommDelete.def)
+  .register(ozoneCommList.nsid, ozoneCommList.def)
+  .register(ozoneVerifyGrant.nsid, ozoneVerifyGrant.def)
+  .register(ozoneVerifyRevoke.nsid, ozoneVerifyRevoke.def)
+  .register(ozoneVerifyList.nsid, ozoneVerifyList.def)

@@ -1,6 +1,8 @@
 import {
   pgTable,
   text,
+  bigserial,
+  boolean,
   timestamp,
   primaryKey,
   index,
@@ -77,3 +79,61 @@ export type OzoneSet = typeof ozoneSets.$inferSelect
 export type NewOzoneSet = typeof ozoneSets.$inferInsert
 export type OzoneSetValue = typeof ozoneSetValues.$inferSelect
 export type NewOzoneSetValue = typeof ozoneSetValues.$inferInsert
+
+// ─── ozone_comm_templates ─────────────────────────────────────────────────
+//
+// Canned operator-to-user email templates. The upstream Ozone UI lists
+// these so moderators pick one when they emit `modEventEmail`; we ship
+// the storage but the modEventEmail integration is left as an exercise
+// in chapter 24.
+export const ozoneCommTemplates = pgTable('ozone_comm_templates', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  name: text('name').notNull().unique(),
+  subject: text('subject').notNull(),
+  contentMarkdown: text('content_markdown').notNull(),
+  lang: text('lang'),
+  disabled: boolean('disabled').default(false).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  lastUpdatedBy: text('last_updated_by'),
+})
+
+// ─── verifications_index ──────────────────────────────────────────────────
+//
+// One row per verification record issued by this labeler. The grant
+// itself is a record in the issuer's repo at
+// `app.bsky.graph.verification` — this table mirrors the indexable
+// dimensions (issuer/subject) for fast filtered listVerifications.
+export const verificationsIndex = pgTable(
+  'verifications_index',
+  {
+    uri: text('uri').primaryKey(),
+    cid: text('cid').notNull(),
+    issuerDid: text('issuer_did').notNull(),
+    subjectDid: text('subject_did').notNull(),
+    handle: text('handle').notNull(),
+    displayName: text('display_name'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    subjectIdx: index('verifications_index_subject_idx').on(
+      t.subjectDid,
+      t.createdAt,
+    ),
+    issuerIdx: index('verifications_index_issuer_idx').on(
+      t.issuerDid,
+      t.createdAt,
+    ),
+  }),
+)
+
+export type OzoneCommTemplate = typeof ozoneCommTemplates.$inferSelect
+export type NewOzoneCommTemplate = typeof ozoneCommTemplates.$inferInsert
+export type VerificationIndex = typeof verificationsIndex.$inferSelect
+export type NewVerificationIndex = typeof verificationsIndex.$inferInsert
