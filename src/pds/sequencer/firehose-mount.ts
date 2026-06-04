@@ -1,4 +1,5 @@
-// WebSocket mount for `com.atproto.sync.subscribeRepos`.
+// WebSocket mounts for `com.atproto.sync.subscribeRepos` and
+// `com.atproto.label.subscribeLabels`.
 //
 // TanStack Start (1.168 / h3 v2) routes only return `Response` objects, so
 // there's no native way to negotiate a WebSocket upgrade from a server file
@@ -11,6 +12,10 @@
 // than going through h3, which is exactly what we want for a long-lived
 // streaming connection.
 //
+// Two subscriptions share this mount: the firehose (chapter 16) and the
+// labels stream (chapter 24). The frame encoding is identical (atproto
+// subscription frames); only the source rows + frame `t` value differ.
+//
 // Note: this module is imported by `vite.config.ts`, which Vite bundles
 // *before* user plugins like `vite-tsconfig-paths` are active. Anything
 // that resolves a `~/*` alias must therefore be `await import()`'d lazily
@@ -21,6 +26,7 @@ import type { Socket } from 'node:net'
 import type { Plugin, ViteDevServer } from 'vite'
 
 const FIREHOSE_PATH = '/xrpc/com.atproto.sync.subscribeRepos'
+const LABELS_PATH = '/xrpc/com.atproto.label.subscribeLabels'
 
 type FirehoseClient = {
   bufferedFrames(): number
@@ -54,6 +60,10 @@ export async function attachFirehose(
     new URL('./firehose.ts', import.meta.url).pathname,
   )) as typeof import('./firehose')
   const { streamFirehose } = firehoseMod
+  const labelsMod = (await vite.ssrLoadModule(
+    new URL('../labels/subscribe.ts', import.meta.url).pathname,
+  )) as typeof import('../labels/subscribe')
+  const { streamLabels } = labelsMod
 
   const wss = new WebSocketServer({ noServer: true })
 
@@ -95,24 +105,48 @@ export async function attachFirehose(
   server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
     const url = req.url ?? ''
     const path = url.split('?', 1)[0] ?? ''
-    if (path !== FIREHOSE_PATH) return
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      onConnect(ws, req, streamFirehose).catch((err) => {
-        console.error('[firehose] connection failed', err)
-        try {
-          ws.close(1011, 'internal error')
-        } catch {
-          // already closed
-        }
+    if (path === FIREHOSE_PATH) {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        onConnect(ws, req, streamFirehose).catch((err) => {
+          console.error('[firehose] connection failed', err)
+          try {
+            ws.close(1011, 'internal error')
+          } catch {
+            // already closed
+          }
+        })
       })
-    })
+      return
+    }
+    if (path === LABELS_PATH) {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        onConnect(ws, req, streamLabels).catch((err) => {
+          console.error('[labels] connection failed', err)
+          try {
+            ws.close(1011, 'internal error')
+          } catch {
+            // already closed
+          }
+        })
+      })
+      return
+    }
   })
 }
+
+// Generic over the two stream functions (firehose + labels). Both
+// accept the same { client, cursor, signal } shape, so the connection
+// handler is shared verbatim.
+type StreamFn = (args: {
+  client: FirehoseClient
+  cursor: number
+  signal: AbortSignal
+}) => Promise<void>
 
 async function onConnect(
   ws: import('ws').WebSocket,
   req: IncomingMessage,
-  streamFirehose: typeof import('./firehose').streamFirehose,
+  stream: StreamFn,
 ): Promise<void> {
   const url = new URL(req.url ?? '', 'http://localhost')
   const cursorParam = url.searchParams.get('cursor')
@@ -137,7 +171,7 @@ async function onConnect(
     close: (code, reason) => ws.close(code, reason),
   }
 
-  await streamFirehose({ client, cursor, signal: controller.signal })
+  await stream({ client, cursor, signal: controller.signal })
 }
 
 /** Vite plugin that wires the firehose into the dev server. */

@@ -94,6 +94,7 @@ import * as ozoneGetRepo from './tools.ozone.moderation.getRepo'
 import * as ozoneGetRecord from './tools.ozone.moderation.getRecord'
 // label surface (chapter 24)
 import * as labelQueryLabels from './com.atproto.label.queryLabels'
+import * as labelSubscribeLabels from './com.atproto.label.subscribeLabels'
 // moderation
 import * as createReport from './com.atproto.moderation.createReport'
 // identity (migration-destination)
@@ -178,3 +179,4 @@ export const registry = new HandlerRegistry()
   .register(ozoneGetRepo.nsid, ozoneGetRepo.def)
   .register(ozoneGetRecord.nsid, ozoneGetRecord.def)
   .register(labelQueryLabels.nsid, labelQueryLabels.def)
+  .register(labelSubscribeLabels.nsid, labelSubscribeLabels.def)

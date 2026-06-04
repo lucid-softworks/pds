@@ -30,6 +30,7 @@ import { getLogger } from './src/lib/logger'
 import { onShutdown } from './src/lib/shutdown'
 import type { FirehoseClient } from './src/pds/sequencer/firehose'
 import { streamFirehose } from './src/pds/sequencer/firehose'
+import { streamLabels } from './src/pds/labels/subscribe'
 
 // We always start from the project root (the dev `tsx server.ts` command
 // and the systemd unit both Cwd at the repo root). Using `process.cwd()`
@@ -41,6 +42,7 @@ const CLIENT_DIR = join(ROOT, 'dist/client')
 const SERVER_BUNDLE = join(ROOT, 'dist/server/server.js')
 
 const FIREHOSE_PATH = '/xrpc/com.atproto.sync.subscribeRepos'
+const LABELS_PATH = '/xrpc/com.atproto.label.subscribeLabels'
 const PORT = Number.parseInt(process.env.PORT ?? '3000', 10)
 const HOSTNAME = process.env.HOST ?? '127.0.0.1'
 
@@ -146,20 +148,33 @@ const wss = new WebSocketServer({ noServer: true })
 httpServer.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
   const url = req.url ?? ''
   const path = url.split('?', 1)[0] ?? ''
-  if (path !== FIREHOSE_PATH) {
-    socket.destroy()
+  if (path === FIREHOSE_PATH) {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      onFirehoseConnect(ws, req).catch((err) => {
+        log.error('firehose connection failed', { err })
+        try {
+          ws.close(1011, 'internal error')
+        } catch {
+          // already closed
+        }
+      })
+    })
     return
   }
-  wss.handleUpgrade(req, socket, head, (ws) => {
-    onFirehoseConnect(ws, req).catch((err) => {
-      log.error('firehose connection failed', { err })
-      try {
-        ws.close(1011, 'internal error')
-      } catch {
-        // already closed
-      }
+  if (path === LABELS_PATH) {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      onLabelsConnect(ws, req).catch((err) => {
+        log.error('labels connection failed', { err })
+        try {
+          ws.close(1011, 'internal error')
+        } catch {
+          // already closed
+        }
+      })
     })
-  })
+    return
+  }
+  socket.destroy()
 })
 
 async function onFirehoseConnect(
@@ -190,6 +205,36 @@ async function onFirehoseConnect(
   }
 
   await streamFirehose({ client, cursor, signal: controller.signal })
+}
+
+async function onLabelsConnect(
+  ws: import('ws').WebSocket,
+  req: IncomingMessage,
+): Promise<void> {
+  const url = new URL(req.url ?? '', 'http://localhost')
+  const cursorParam = url.searchParams.get('cursor')
+  const cursor = cursorParam != null ? Number.parseInt(cursorParam, 10) : 0
+  if (!Number.isFinite(cursor) || cursor < 0) {
+    ws.close(1008, 'cursor must be a non-negative integer')
+    return
+  }
+
+  const controller = new AbortController()
+  ws.on('close', () => controller.abort())
+  ws.on('error', () => controller.abort())
+
+  const client: FirehoseClient = {
+    bufferedFrames: () => ws.bufferedAmount,
+    send: (frame) =>
+      new Promise<void>((resolve, reject) => {
+        ws.send(frame, { binary: true }, (err) =>
+          err ? reject(err) : resolve(),
+        )
+      }),
+    close: (code, reason) => ws.close(code, reason),
+  }
+
+  await streamLabels({ client, cursor, signal: controller.signal })
 }
 
 onShutdown('firehose-ws', async () => {
