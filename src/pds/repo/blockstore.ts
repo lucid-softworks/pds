@@ -23,11 +23,14 @@ type WriteSurface = {
 }
 
 /** Store a single block for a repo, idempotently. Pass `tx` when called from
- *  inside a `db.transaction` callback. */
+ *  inside a `db.transaction` callback. `repoRev` (optional) tags the block
+ *  with the commit rev at which it was first written; the
+ *  `com.atproto.sync.getRepo?since=<rev>` filter reads this column. */
 export async function putBlock(
   repoDid: string,
   block: Block,
   handle: WriteSurface = db,
+  repoRev?: string,
 ): Promise<void> {
   await handle
     .insert(repoBlocks)
@@ -36,6 +39,7 @@ export async function putBlock(
       cid: block.cid.toString(),
       bytes: block.bytes,
       size: block.bytes.length,
+      repoRev: repoRev ?? null,
     })
     .onConflictDoNothing()
 }
@@ -46,6 +50,7 @@ export async function putBlocks(
   repoDid: string,
   blocks: Block[],
   handle: WriteSurface = db,
+  repoRev?: string,
 ): Promise<void> {
   if (blocks.length === 0) return
   await handle
@@ -56,6 +61,7 @@ export async function putBlocks(
         cid: b.cid.toString(),
         bytes: b.bytes,
         size: b.bytes.length,
+        repoRev: repoRev ?? null,
       })),
     )
     .onConflictDoNothing()

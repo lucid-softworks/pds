@@ -104,10 +104,16 @@ export const repoBlocks = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    // The commit rev (TID) at which this block was first persisted.
+    // `sync.getRepo?since=<rev>` filters by `repo_rev > since` to
+    // stream the diff since the consumer's last cursor. NULL on rows
+    // written before the column was added.
+    repoRev: text('repo_rev'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.repoDid, t.cid] }),
     cidIdx: index('repo_blocks_cid_idx').on(t.cid),
+    repoRevIdx: index('repo_blocks_repo_rev_idx').on(t.repoDid, t.repoRev),
   }),
 )
 

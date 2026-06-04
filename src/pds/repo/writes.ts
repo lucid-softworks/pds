@@ -321,7 +321,12 @@ async function persistCommit(handle: WriteHandle, args: PersistArgs): Promise<vo
   // mutations. Mixing in a write through the global `db` proxy here would
   // deadlock on single-connection drivers (PGlite holds the tx lock while
   // the outside write waits on it).
-  await putBlocks(args.did, [...dedup.values()], handle)
+  //
+  // Each block is tagged with the commit rev (TID) at which it was first
+  // written so `sync.getRepo?since=<rev>` can filter the CAR by
+  // `repo_rev > since`. Blocks already in repo_blocks keep their original
+  // rev (the ON CONFLICT DO NOTHING in putBlocks declines to update).
+  await putBlocks(args.did, [...dedup.values()], handle, args.newRev)
 
   await handle
     .update(repos)
