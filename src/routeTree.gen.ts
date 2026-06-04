@@ -13,6 +13,7 @@ import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
 import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as AppRouteRouteImport } from './routes/app/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ModIndexRouteImport } from './routes/mod/index'
 import { Route as DocsIndexRouteImport } from './routes/docs/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
@@ -22,6 +23,11 @@ import { Route as OauthRevokeRouteImport } from './routes/oauth/revoke'
 import { Route as OauthParRouteImport } from './routes/oauth/par'
 import { Route as OauthJwksRouteImport } from './routes/oauth/jwks'
 import { Route as OauthAuthorizeRouteImport } from './routes/oauth/authorize'
+import { Route as ModTeamRouteImport } from './routes/mod/team'
+import { Route as ModSubjectRouteImport } from './routes/mod/subject'
+import { Route as ModLogoutRouteImport } from './routes/mod/logout'
+import { Route as ModLoginRouteImport } from './routes/mod/login'
+import { Route as ModEventsRouteImport } from './routes/mod/events'
 import { Route as DocsSlugRouteImport } from './routes/docs/$slug'
 import { Route as AppFeedRouteImport } from './routes/app/feed'
 import { Route as AppComposeRouteImport } from './routes/app/compose'
@@ -49,6 +55,11 @@ const AppRouteRoute = AppRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModIndexRoute = ModIndexRouteImport.update({
+  id: '/mod/',
+  path: '/mod/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DocsIndexRoute = DocsIndexRouteImport.update({
@@ -94,6 +105,31 @@ const OauthJwksRoute = OauthJwksRouteImport.update({
 const OauthAuthorizeRoute = OauthAuthorizeRouteImport.update({
   id: '/oauth/authorize',
   path: '/oauth/authorize',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModTeamRoute = ModTeamRouteImport.update({
+  id: '/mod/team',
+  path: '/mod/team',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModSubjectRoute = ModSubjectRouteImport.update({
+  id: '/mod/subject',
+  path: '/mod/subject',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModLogoutRoute = ModLogoutRouteImport.update({
+  id: '/mod/logout',
+  path: '/mod/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModLoginRoute = ModLoginRouteImport.update({
+  id: '/mod/login',
+  path: '/mod/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModEventsRoute = ModEventsRouteImport.update({
+  id: '/mod/events',
+  path: '/mod/events',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DocsSlugRoute = DocsSlugRouteImport.update({
@@ -151,6 +187,11 @@ export interface FileRoutesByFullPath {
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/mod/events': typeof ModEventsRoute
+  '/mod/login': typeof ModLoginRoute
+  '/mod/logout': typeof ModLogoutRoute
+  '/mod/subject': typeof ModSubjectRoute
+  '/mod/team': typeof ModTeamRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/jwks': typeof OauthJwksRoute
   '/oauth/par': typeof OauthParRoute
@@ -160,6 +201,7 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/docs/': typeof DocsIndexRoute
+  '/mod/': typeof ModIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -173,6 +215,11 @@ export interface FileRoutesByTo {
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/mod/events': typeof ModEventsRoute
+  '/mod/login': typeof ModLoginRoute
+  '/mod/logout': typeof ModLogoutRoute
+  '/mod/subject': typeof ModSubjectRoute
+  '/mod/team': typeof ModTeamRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/jwks': typeof OauthJwksRoute
   '/oauth/par': typeof OauthParRoute
@@ -182,6 +229,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/app': typeof AppIndexRoute
   '/docs': typeof DocsIndexRoute
+  '/mod': typeof ModIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -197,6 +245,11 @@ export interface FileRoutesById {
   '/app/compose': typeof AppComposeRoute
   '/app/feed': typeof AppFeedRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/mod/events': typeof ModEventsRoute
+  '/mod/login': typeof ModLoginRoute
+  '/mod/logout': typeof ModLogoutRoute
+  '/mod/subject': typeof ModSubjectRoute
+  '/mod/team': typeof ModTeamRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/jwks': typeof OauthJwksRoute
   '/oauth/par': typeof OauthParRoute
@@ -206,6 +259,7 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/docs/': typeof DocsIndexRoute
+  '/mod/': typeof ModIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -222,6 +276,11 @@ export interface FileRouteTypes {
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
+    | '/mod/events'
+    | '/mod/login'
+    | '/mod/logout'
+    | '/mod/subject'
+    | '/mod/team'
     | '/oauth/authorize'
     | '/oauth/jwks'
     | '/oauth/par'
@@ -231,6 +290,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/app/'
     | '/docs/'
+    | '/mod/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -244,6 +304,11 @@ export interface FileRouteTypes {
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
+    | '/mod/events'
+    | '/mod/login'
+    | '/mod/logout'
+    | '/mod/subject'
+    | '/mod/team'
     | '/oauth/authorize'
     | '/oauth/jwks'
     | '/oauth/par'
@@ -253,6 +318,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/app'
     | '/docs'
+    | '/mod'
   id:
     | '__root__'
     | '/'
@@ -267,6 +333,11 @@ export interface FileRouteTypes {
     | '/app/compose'
     | '/app/feed'
     | '/docs/$slug'
+    | '/mod/events'
+    | '/mod/login'
+    | '/mod/logout'
+    | '/mod/subject'
+    | '/mod/team'
     | '/oauth/authorize'
     | '/oauth/jwks'
     | '/oauth/par'
@@ -276,6 +347,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/app/'
     | '/docs/'
+    | '/mod/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -289,6 +361,11 @@ export interface RootRouteChildren {
   AdminLogoutRoute: typeof AdminLogoutRoute
   AdminSignupsRoute: typeof AdminSignupsRoute
   DocsSlugRoute: typeof DocsSlugRoute
+  ModEventsRoute: typeof ModEventsRoute
+  ModLoginRoute: typeof ModLoginRoute
+  ModLogoutRoute: typeof ModLogoutRoute
+  ModSubjectRoute: typeof ModSubjectRoute
+  ModTeamRoute: typeof ModTeamRoute
   OauthAuthorizeRoute: typeof OauthAuthorizeRoute
   OauthJwksRoute: typeof OauthJwksRoute
   OauthParRoute: typeof OauthParRoute
@@ -297,6 +374,7 @@ export interface RootRouteChildren {
   XrpcNsidRoute: typeof XrpcNsidRoute
   AdminIndexRoute: typeof AdminIndexRoute
   DocsIndexRoute: typeof DocsIndexRoute
+  ModIndexRoute: typeof ModIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -327,6 +405,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/': {
+      id: '/mod/'
+      path: '/mod'
+      fullPath: '/mod/'
+      preLoaderRoute: typeof ModIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/docs/': {
@@ -390,6 +475,41 @@ declare module '@tanstack/react-router' {
       path: '/oauth/authorize'
       fullPath: '/oauth/authorize'
       preLoaderRoute: typeof OauthAuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/team': {
+      id: '/mod/team'
+      path: '/mod/team'
+      fullPath: '/mod/team'
+      preLoaderRoute: typeof ModTeamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/subject': {
+      id: '/mod/subject'
+      path: '/mod/subject'
+      fullPath: '/mod/subject'
+      preLoaderRoute: typeof ModSubjectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/logout': {
+      id: '/mod/logout'
+      path: '/mod/logout'
+      fullPath: '/mod/logout'
+      preLoaderRoute: typeof ModLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/login': {
+      id: '/mod/login'
+      path: '/mod/login'
+      fullPath: '/mod/login'
+      preLoaderRoute: typeof ModLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mod/events': {
+      id: '/mod/events'
+      path: '/mod/events'
+      fullPath: '/mod/events'
+      preLoaderRoute: typeof ModEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/docs/$slug': {
@@ -478,6 +598,11 @@ const rootRouteChildren: RootRouteChildren = {
   AdminLogoutRoute: AdminLogoutRoute,
   AdminSignupsRoute: AdminSignupsRoute,
   DocsSlugRoute: DocsSlugRoute,
+  ModEventsRoute: ModEventsRoute,
+  ModLoginRoute: ModLoginRoute,
+  ModLogoutRoute: ModLogoutRoute,
+  ModSubjectRoute: ModSubjectRoute,
+  ModTeamRoute: ModTeamRoute,
   OauthAuthorizeRoute: OauthAuthorizeRoute,
   OauthJwksRoute: OauthJwksRoute,
   OauthParRoute: OauthParRoute,
@@ -486,6 +611,7 @@ const rootRouteChildren: RootRouteChildren = {
   XrpcNsidRoute: XrpcNsidRoute,
   AdminIndexRoute: AdminIndexRoute,
   DocsIndexRoute: DocsIndexRoute,
+  ModIndexRoute: ModIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

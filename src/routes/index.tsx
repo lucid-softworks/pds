@@ -116,6 +116,10 @@ function HomePage() {
           Dashboard for signups and invite codes. Gated by{' '}
           <code className="font-mono text-xs bg-[var(--color-surface-2)] px-1 py-0.5 rounded">PDS_ADMIN_HANDLE</code>.
         </LinkCard>
+        <LinkCard title="Moderation" href="/mod" hardNav>
+          Reports queue + Ozone-shaped action log. Gated by membership in{' '}
+          <code className="font-mono text-xs bg-[var(--color-surface-2)] px-1 py-0.5 rounded">mod_team</code>.
+        </LinkCard>
       </section>
 
       <footer className="mt-16 border-t border-[var(--color-border)] pt-6 text-sm text-[var(--color-fg-muted)]">
