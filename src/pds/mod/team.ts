@@ -19,6 +19,9 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '~/lib/db'
 import { accounts, modTeam, type ModTeamMember } from '~/lib/db/schema'
 import { getConfig } from '~/lib/config'
+import { getKeyWrapper } from '~/pds/auth/key_wrap'
+import { ensureLabelerService } from '~/pds/did/plc'
+import { emitIdentity } from '~/pds/sequencer/sequence'
 
 export type ModTeamLead = {
   did: string
@@ -46,6 +49,18 @@ export async function getModTeamLead(): Promise<ModTeamLead | null> {
   }
   cachedLead = { did: row.did, handle: row.handle }
   await ensureLeadRow(cachedLead.did)
+  // Best-effort: rotate the lead's PLC op to add the #atproto_labeler
+  // service entry if it isn't there yet. Idempotent — returns early
+  // when the entry already exists. Failures here don't block the
+  // mod-surface read (the labeler is discoverable via our local DID
+  // doc until plc.directory catches up).
+  await ensureLeadLabelerService(cachedLead.did).catch((err) => {
+    console.warn(
+      '[mod] failed to ensure labeler service for lead',
+      cachedLead?.did,
+      err,
+    )
+  })
   return cachedLead
 }
 
@@ -124,4 +139,32 @@ async function ensureLeadRow(did: string): Promise<void> {
     .insert(modTeam)
     .values({ did, role: 'lead', addedBy: null })
     .onConflictDoNothing({ target: modTeam.did })
+}
+
+/** Unwrap the account's rotation key and rotate its PLC op to include
+ *  `#atproto_labeler` if not already advertised. Emits #identity on
+ *  success so the network re-resolves the DID document. Called from
+ *  `getModTeamLead()` and tolerant of being called when the rotation
+ *  isn't needed (early-returns inside `ensureLabelerService`). */
+async function ensureLeadLabelerService(did: string): Promise<void> {
+  const rows = await db
+    .select({ rotationKeyPriv: accounts.rotationKeyPriv, handle: accounts.handle })
+    .from(accounts)
+    .where(eq(accounts.did, did))
+    .limit(1)
+  const acct = rows[0]
+  if (!acct) return
+  const rotationKeyPrivPlain = await getKeyWrapper().unwrap(
+    acct.rotationKeyPriv,
+  )
+  const result = await ensureLabelerService({
+    did,
+    rotationKeyPriv: rotationKeyPrivPlain,
+    pdsEndpoint: getConfig().publicUrl,
+  })
+  if (result !== null) {
+    // Op was rotated — nudge AppViews to re-resolve the DID document
+    // so the labeler entry becomes visible to bsky.app et al.
+    await emitIdentity({ did, handle: acct.handle }).catch(() => {})
+  }
 }

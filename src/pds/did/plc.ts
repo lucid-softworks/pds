@@ -196,6 +196,57 @@ export async function rotatePlc(input: RotateInput): Promise<RotateResult> {
   }
 }
 
+/** Rotate the DID's PLC op to advertise an `atproto_labeler` service
+ *  entry pointing at the PDS's public URL. Idempotent: returns null if
+ *  the entry is already present.
+ *
+ *  Called from the team-lead bootstrap (`src/pds/mod/team.ts`) the first
+ *  time `getModTeamLead()` resolves the configured handle to an
+ *  account. The genesis op only includes `atproto_pds`; AppViews fetch
+ *  the canonical DID document from plc.directory, so without this
+ *  rotation no one outside this PDS would know the team-lead is also a
+ *  labeler. See chapter 24.
+ *
+ *  Returns the cid + seq of the new op when one was issued. */
+export async function ensureLabelerService(input: {
+  did: string
+  rotationKeyPriv: string
+  pdsEndpoint: string
+}): Promise<{ cid: string; seq: number } | null> {
+  const latest = await loadLatestPlcOp(input.did)
+  if (latest.op.services.atproto_labeler) return null
+
+  const unsigned: UnsignedPlcOp = {
+    type: 'plc_operation',
+    rotationKeys: latest.op.rotationKeys,
+    verificationMethods: latest.op.verificationMethods,
+    alsoKnownAs: latest.op.alsoKnownAs,
+    services: {
+      ...latest.op.services,
+      atproto_labeler: {
+        type: 'AtprotoLabeler',
+        endpoint: input.pdsEndpoint,
+      },
+    },
+    prev: latest.cid,
+  }
+  const unsignedBlock = await encode(unsigned)
+  const sigBytes = signBytes(input.rotationKeyPriv, unsignedBlock.bytes)
+  const signed: SignedPlcOp = { ...unsigned, sig: base64url(sigBytes) }
+  const signedBlock = await encode(signed)
+  const nextSeq = latest.seq + 1
+
+  await db.insert(plcOperations).values({
+    did: input.did,
+    cid: signedBlock.cid.toString(),
+    operation: signedBlock.bytes,
+    seq: nextSeq,
+  })
+  await publishPlcOp({ did: input.did, signedOpBytes: signedBlock.bytes })
+
+  return { cid: signedBlock.cid.toString(), seq: nextSeq }
+}
+
 /** Load the most recent PLC op for `did`. Exported because the
  *  `signPlcOperation` XRPC handler needs to forward unchanged fields from
  *  the latest op into a caller-supplied rotate op. */

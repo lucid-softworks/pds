@@ -51,21 +51,37 @@ schema, separate UI, separate auth gate) but share the runtime.
 The moderation surface is "owned" by one atproto account on this PDS,
 configurable via `PDS_MOD_TEAM_HANDLE` (default `mod.<hostname>`).
 The operator creates that account through the normal signup flow —
-nothing special is needed. Once it exists, three things change:
+nothing special is needed. Once it exists, four things happen on the
+next `getModTeamLead()` call (lazy, cached for the process lifetime):
 
-1. **A row in `mod_team`** with `role='lead'` is auto-seeded on first
-   read.
-2. **The account's DID document** grows an `#atproto_labeler` service
-   entry pointing at the PDS's public URL. AppViews discovering the
-   DID see both `#atproto_pds` and `#atproto_labeler` and treat the
-   account as both a regular atproto user *and* a labeler.
-3. **The labels table is signed with that account's key.** Every
+1. **A row in `mod_team`** with `role='lead'` is auto-seeded.
+2. **The account's PLC op is rotated** to add an `#atproto_labeler`
+   service entry pointing at the PDS's public URL. The genesis op
+   only includes `#atproto_pds`; the rotation appends to
+   `plc_operations` locally, publishes to plc.directory via
+   `publishPlcOp`, and emits `#identity` on the firehose so AppViews
+   re-resolve the DID document. Idempotent — `ensureLabelerService`
+   in `src/pds/did/plc.ts` short-circuits when the entry is already
+   present.
+3. **The account's local DID document grows the same entry.**
+   `buildDidDocument`'s `isLabeler` flag is set when the DID matches
+   the team lead, so our own `resolveLocalDid` / `describeRepo`
+   responses include `#atproto_labeler` alongside `#atproto_pds`.
+4. **The labels table is signed with that account's key.** Every
    label emitted via `tools.ozone.moderation.emitEvent#modEventLabel`
    is signed with the team-lead's repo signing key — the same key
    that signs the account's own MST commits. Downstream consumers
    fetch the DID document, find the `#atproto` verificationMethod,
    and verify labels against that public key without further
    coordination.
+
+The bootstrap happens lazily and self-heals: if you change
+`PDS_MOD_TEAM_HANDLE` to point at a different account later, the
+next read clears the cache, the new lead's `mod_team` row gets
+seeded, and the new lead's PLC op gets rotated. The old lead's
+labeler entry stays in plc.directory's history — operators wanting
+to retract it must rotate the old account's op manually (none of
+the canonical Ozone clients require this, so we don't ship a knob).
 
 The lead account's other facts — its handle, its records, its DID
 document — work like any other atproto account. The moderation
