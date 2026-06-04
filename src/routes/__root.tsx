@@ -5,7 +5,8 @@ import {
   Outlet,
   Scripts,
 } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useState, type ReactNode } from 'react'
 import appCss from '~/styles/app.css?url'
 
 export const Route = createRootRoute({
@@ -34,10 +35,33 @@ export const Route = createRootRoute({
 })
 
 function RootComponent() {
+  // One QueryClient per browser tab. useState's initializer fires exactly
+  // once per mount, so we don't recreate the cache on re-render. SSR is
+  // safe because TanStack Start re-runs the component on the server and
+  // creates its own (throwaway) client there — none of our queries fire
+  // during SSR (they're all gated on a localStorage session), so there's
+  // no hydration payload to dehydrate.
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            // Treat data as fresh for a minute — avoids refetch storms on
+            // route remount during quick back/forward navigation.
+            staleTime: 60 * 1000,
+            // refetchOnWindowFocus is on by default; that's the behaviour
+            // we want for the feed (come back, see new posts).
+            retry: 1,
+          },
+        },
+      }),
+  )
   return (
-    <RootDocument>
-      <Outlet />
-    </RootDocument>
+    <QueryClientProvider client={queryClient}>
+      <RootDocument>
+        <Outlet />
+      </RootDocument>
+    </QueryClientProvider>
   )
 }
 

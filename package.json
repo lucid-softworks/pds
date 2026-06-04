@@ -33,6 +33,7 @@
     "@noble/curves": "^1.7.0",
     "@noble/hashes": "^1.6.1",
     "@shikijs/rehype": "^1.24.0",
+    "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-router": "^1.97.0",
     "@tanstack/react-start": "^1.97.0",
     "@tanstack/router-plugin": "^1.97.0",
