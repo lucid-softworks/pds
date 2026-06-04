@@ -49,6 +49,13 @@ export type PdsConfig = {
    *  account through the regular session flow; /admin then checks the
    *  current handle matches this env value. See chapter 19. */
   adminHandle: string | null
+  /** Handle of the moderation-team lead account. Defaults to `mod.<hostname>`.
+   *  At startup we resolve the handle to a DID and seed `mod_team` if not
+   *  already present; the account's DID document advertises the labeler
+   *  service endpoint at `getConfig().publicUrl`. When the handle doesn't
+   *  resolve (no account yet), /mod returns a guided 503 and the labeler
+   *  surface advertises nothing. See chapter 24. */
+  modTeamHandle: string
 }
 
 let cached: PdsConfig | null = null
@@ -90,6 +97,7 @@ export function getConfig(): PdsConfig {
     dpopReplayStoreKind:
       process.env.PDS_DPOP_REPLAY_STORE === 'redis' ? 'redis' : 'in-memory',
     adminHandle: resolveAdminHandle(),
+    modTeamHandle: resolveModTeamHandle(hostname),
   }
   return cached
 }
@@ -147,6 +155,15 @@ function resolveAdminHandle(): string | null {
   const trimmed = raw.trim().toLowerCase()
   if (trimmed.length === 0) return null
   return trimmed
+}
+
+function resolveModTeamHandle(hostname: string): string {
+  const raw = process.env.PDS_MOD_TEAM_HANDLE
+  if (raw) {
+    const trimmed = raw.trim().toLowerCase()
+    if (trimmed.length > 0) return trimmed
+  }
+  return `mod.${hostname}`
 }
 
 function required(name: string, fallback?: string): string {
