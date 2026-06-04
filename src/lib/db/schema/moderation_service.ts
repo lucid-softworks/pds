@@ -4,6 +4,7 @@ import {
   bigserial,
   bigint,
   boolean,
+  integer,
   timestamp,
   index,
 } from 'drizzle-orm/pg-core'
@@ -84,6 +85,14 @@ export const modSubjectStatus = pgTable(
     takedownEventId: bigint('takedown_event_id', { mode: 'number' }),
     reviewState: text('review_state').default('open').notNull(),
     lastComment: text('last_comment'),
+    // modEventTag emissions accumulate here. Free-form strings — the
+    // upstream Ozone UI uses them as user-defined categories.
+    tags: text('tags').array(),
+    // modEventPriorityScore sets this. 0..100; null = unset.
+    priorityScore: integer('priority_score'),
+    // 'open' | 'resolved' | null. Flipped to 'resolved' by
+    // modEventResolveAppeal.
+    appealState: text('appeal_state'),
     lastEventAt: timestamp('last_event_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -128,6 +137,21 @@ export const labels = pgTable(
   }),
 )
 
+// ─── mod_muted_reporters ──────────────────────────────────────────────────
+//
+// DIDs whose moderation_reports rows are de-emphasised in the operator
+// queue. Flipped by modEventMuteReporter / modEventUnmuteReporter.
+// Consumers join against this table to filter; the reports themselves
+// stay visible to a deliberate query.
+export const modMutedReporters = pgTable('mod_muted_reporters', {
+  did: text('did').primaryKey(),
+  mutedAt: timestamp('muted_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  mutedBy: text('muted_by'),
+  comment: text('comment'),
+})
+
 // ─── mod_report_resolution ────────────────────────────────────────────────
 //
 // Links each moderation_reports row to the mod_events row that closed
@@ -161,3 +185,5 @@ export type Label = typeof labels.$inferSelect
 export type NewLabel = typeof labels.$inferInsert
 export type ModReportResolution = typeof modReportResolution.$inferSelect
 export type NewModReportResolution = typeof modReportResolution.$inferInsert
+export type ModMutedReporter = typeof modMutedReporters.$inferSelect
+export type NewModMutedReporter = typeof modMutedReporters.$inferInsert

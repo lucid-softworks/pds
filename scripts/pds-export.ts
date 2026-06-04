@@ -48,6 +48,7 @@ import {
   modTeam,
   modEvents,
   modSubjectStatus,
+  modMutedReporters,
   modReportResolution,
   labels,
   ozoneSettings,
@@ -338,6 +339,19 @@ function buildSpecs(): TableSpec[] {
           .select()
           .from(modSubjectStatus)
           .orderBy(asc(modSubjectStatus.id))
+          .limit(l)
+          .offset(o),
+    },
+    {
+      name: 'mod_muted_reporters',
+      byteaCols: [],
+      bigintCols: [],
+      tokenLike: false,
+      fetch: (l, o) =>
+        db
+          .select()
+          .from(modMutedReporters)
+          .orderBy(asc(modMutedReporters.did))
           .limit(l)
           .offset(o),
     },

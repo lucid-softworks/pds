@@ -155,7 +155,7 @@ involved.
 
 The hot path. The lexicon defines 25+ event types
 ([`tools.ozone.moderation.defs#mod*Event`][defs-lexicon]); we
-implement ten of them:
+implement sixteen of them:
 
 [defs-lexicon]: https://github.com/bluesky-social/atproto/blob/main/lexicons/tools/ozone/moderation/defs.json
 
@@ -171,6 +171,12 @@ implement ten of them:
 | `modEventUnmute` | flips `review_state` back to `open` |
 | `modEventDivert` | flips `review_state` to `diverted`; resolves open reports |
 | `modEventEmail` | sends an email to the subject account via the existing backend; pulls body from a `tools.ozone.communication.*` template when `templateName` is supplied |
+| `modEventTag` | merges `event.add`/`event.remove` into `mod_subject_status.tags` |
+| `modEventMuteReporter` | inserts the subject DID into `mod_muted_reporters` (consumers join to filter) |
+| `modEventUnmuteReporter` | deletes the matching row |
+| `modEventPriorityScore` | writes `event.score` to `mod_subject_status.priority_score` |
+| `modEventResolveAppeal` | flips `mod_subject_status.appeal_state` to `resolved` |
+| `revokeAccountCredentialsEvent` | deletes every `refresh_tokens` row for the subject account, forcing logout on every device |
 
 Unsupported event types return `EventTypeNotSupported` with a clear
 message — a future Bluesky-defined type doesn't silently no-op, so
@@ -372,11 +378,12 @@ Both are gated by `requireModerator`.
 
 ## Known gaps
 
-- **Scheduled takedowns + age-assurance + identity-event +
-  account-revoke event types.** The registry rejects them today;
-  pick them up as needed. The v1 cut covered the operationally
-  meaningful subset (takedown / reverseTakedown / comment /
-  acknowledge / escalate / label / mute / unmute / divert / email).
+- **Scheduled takedowns + age-assurance event types.** Both need
+  scheduler infrastructure we don't ship (a background runner for
+  fire-on-future-date events, an age-attestation store). The
+  remaining passive event types — `accountEvent`, `identityEvent`,
+  `recordEvent` — overlap with what the firehose already emits, so
+  we don't double-record them.
 - (Closed — every `tools.ozone.*` surface now has a paired `/mod`
   page: `labels`, `safelink`, `templates`, `verifications`, `sets`,
   `settings`, `signatures`, `team`, `events`.)

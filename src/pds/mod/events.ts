@@ -30,10 +30,12 @@ import {
   blobs,
   labels,
   modEvents,
+  modMutedReporters,
   modReportResolution,
   modSubjectStatus,
   moderationReports,
   records,
+  refreshTokens,
 } from '~/lib/db/schema'
 
 // pglite + postgres-js drivers union erases the `.returning(fields)`
@@ -63,6 +65,12 @@ export const SUPPORTED_EVENT_TYPES = [
   'tools.ozone.moderation.defs#modEventUnmute',
   'tools.ozone.moderation.defs#modEventDivert',
   'tools.ozone.moderation.defs#modEventEmail',
+  'tools.ozone.moderation.defs#modEventTag',
+  'tools.ozone.moderation.defs#modEventMuteReporter',
+  'tools.ozone.moderation.defs#modEventUnmuteReporter',
+  'tools.ozone.moderation.defs#modEventPriorityScore',
+  'tools.ozone.moderation.defs#modEventResolveAppeal',
+  'tools.ozone.moderation.defs#revokeAccountCredentialsEvent',
 ] as const
 
 const RepoRefSchema = z.object({
@@ -203,6 +211,43 @@ export async function applyEmitEvent(args: {
       await applyEmailEvent({ event: input.event, subjectFlat })
       break
     }
+    case 'modEventTag':
+    case 'modEventPriorityScore':
+    case 'modEventResolveAppeal': {
+      // Side effects handled inside the subject_status upsert below —
+      // each of these patches a different column on the cache row.
+      break
+    }
+    case 'modEventMuteReporter': {
+      await applyMuteReporter({
+        event: input.event,
+        subjectFlat,
+        mutedBy: input.createdBy,
+      })
+      break
+    }
+    case 'modEventUnmuteReporter': {
+      await applyUnmuteReporter({ subjectFlat })
+      break
+    }
+    case 'revokeAccountCredentialsEvent': {
+      // Wipe every refresh token issued to this account, forcing a
+      // logout on every device. Access tokens (HS256 JWTs) stay
+      // valid until expiry — that's an unavoidable property of
+      // stateless tokens — but the user can't acquire fresh ones
+      // without re-authenticating.
+      if (subject.$type === REPO_REF) {
+        await db
+          .delete(refreshTokens)
+          .where(eq(refreshTokens.did, subject.did))
+      } else {
+        throw BadRequest(
+          'revokeAccountCredentialsEvent requires a repoRef subject',
+          'InvalidRequest',
+        )
+      }
+      break
+    }
   }
 
   await upsertSubjectStatus({
@@ -211,6 +256,7 @@ export async function applyEmitEvent(args: {
     eventType,
     eventId: row.id,
     comment,
+    event: input.event,
   })
 
   // Auto-resolve open reports against the subject when a closing
@@ -343,6 +389,43 @@ async function applyReverseTakedown(
         ),
       )
   }
+}
+
+async function applyMuteReporter(args: {
+  event: { $type: string; [k: string]: unknown }
+  subjectFlat: { did: string; uri: string | null; cid: string | null }
+  mutedBy: string
+}): Promise<void> {
+  if (!args.subjectFlat.did) {
+    throw BadRequest(
+      'modEventMuteReporter requires an account subject (repoRef)',
+      'InvalidRequest',
+    )
+  }
+  const comment =
+    typeof args.event.comment === 'string' ? args.event.comment : null
+  await db
+    .insert(modMutedReporters)
+    .values({
+      did: args.subjectFlat.did,
+      mutedBy: args.mutedBy,
+      comment,
+    })
+    .onConflictDoNothing({ target: modMutedReporters.did })
+}
+
+async function applyUnmuteReporter(args: {
+  subjectFlat: { did: string; uri: string | null; cid: string | null }
+}): Promise<void> {
+  if (!args.subjectFlat.did) {
+    throw BadRequest(
+      'modEventUnmuteReporter requires an account subject (repoRef)',
+      'InvalidRequest',
+    )
+  }
+  await db
+    .delete(modMutedReporters)
+    .where(eq(modMutedReporters.did, args.subjectFlat.did))
 }
 
 async function applyEmailEvent(args: {
@@ -566,6 +649,7 @@ async function upsertSubjectStatus(args: {
   eventType: string
   eventId: number
   comment: string | null
+  event?: { $type: string; [k: string]: unknown }
 }): Promise<void> {
   // Look up existing row first; drizzle's onConflict isn't trivial with
   // our COALESCE-aware index, so we do a manual upsert.
@@ -580,7 +664,7 @@ async function upsertSubjectStatus(args: {
           sql`${modSubjectStatus.subjectUri} IS NULL`,
         )
   const existing = await db
-    .select({ id: modSubjectStatus.id })
+    .select({ id: modSubjectStatus.id, tags: modSubjectStatus.tags })
     .from(modSubjectStatus)
     .where(where)
     .limit(1)
@@ -627,6 +711,26 @@ async function upsertSubjectStatus(args: {
     patch.takedownEventId = null
   }
   if (reviewState !== null) patch.reviewState = reviewState
+
+  // modEventTag — replace `tags` with the union of existing + new.
+  // The event carries `add: [string]` and `remove: [string]` arrays
+  // per the lexicon; both are optional.
+  if (args.eventType === 'modEventTag' && args.event) {
+    const current = new Set(existing[0]?.tags ?? [])
+    const add = Array.isArray(args.event.add) ? args.event.add : []
+    const remove = Array.isArray(args.event.remove) ? args.event.remove : []
+    for (const t of add) if (typeof t === 'string') current.add(t)
+    for (const t of remove) if (typeof t === 'string') current.delete(t)
+    patch.tags = Array.from(current)
+  }
+  if (args.eventType === 'modEventPriorityScore' && args.event) {
+    const score = Number(args.event.score)
+    if (Number.isFinite(score)) patch.priorityScore = score
+  }
+  if (args.eventType === 'modEventResolveAppeal') {
+    patch.appealState = 'resolved'
+  }
+
   await db.update(modSubjectStatus).set(patch).where(where)
 }
 

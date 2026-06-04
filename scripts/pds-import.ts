@@ -52,6 +52,7 @@ import {
   modTeam,
   modEvents,
   modSubjectStatus,
+  modMutedReporters,
   modReportResolution,
   labels,
   ozoneSettings,
@@ -95,6 +96,7 @@ const TABLES: Record<string, { _: { name: string } } & Record<string, unknown>> 
     mod_team: modTeam as never,
     mod_events: modEvents as never,
     mod_subject_status: modSubjectStatus as never,
+    mod_muted_reporters: modMutedReporters as never,
     // mod_report_resolution must come AFTER moderation_reports + mod_events
     // (FK cascade)
     mod_report_resolution: modReportResolution as never,
