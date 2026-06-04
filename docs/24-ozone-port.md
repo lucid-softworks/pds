@@ -155,18 +155,22 @@ involved.
 
 The hot path. The lexicon defines 25+ event types
 ([`tools.ozone.moderation.defs#mod*Event`][defs-lexicon]); we
-implement six of them in v1:
+implement ten of them:
 
 [defs-lexicon]: https://github.com/bluesky-social/atproto/blob/main/lexicons/tools/ozone/moderation/defs.json
 
 | Event type | Side effect |
 | --- | --- |
-| `modEventTakedown` | sets `records.takedown_ref` / `blobs.takedown_ref` / `accounts.status='takendown'` |
+| `modEventTakedown` | sets `records.takedown_ref` / `blobs.takedown_ref` / `accounts.status='takendown'`; resolves open reports |
 | `modEventReverseTakedown` | clears the above |
 | `modEventComment` | record-only; no state change |
-| `modEventAcknowledge` | flips `mod_subject_status.review_state` to `acknowledged` |
+| `modEventAcknowledge` | flips `mod_subject_status.review_state` to `acknowledged`; resolves open reports |
 | `modEventEscalate` | flips `review_state` to `escalated` |
 | `modEventLabel` | signs + appends to the `labels` table |
+| `modEventMute` | flips `review_state` to `muted` |
+| `modEventUnmute` | flips `review_state` back to `open` |
+| `modEventDivert` | flips `review_state` to `diverted`; resolves open reports |
+| `modEventEmail` | sends an email to the subject account via the existing backend; pulls body from a `tools.ozone.communication.*` template when `templateName` is supplied |
 
 Unsupported event types return `EventTypeNotSupported` with a clear
 message — a future Bluesky-defined type doesn't silently no-op, so
@@ -361,15 +365,15 @@ Both are gated by `requireModerator`.
 
 ## Known gaps
 
-- **`subscribeLabels` (WebSocket).** Polled-only for now. Shape it
-  like the firehose when you wire it.
-- **Event types beyond the v1 six.** Mute, divert, email-out,
-  scheduled takedown, age-assurance, identity-event, etc. The
-  registry rejects them today; pick them up as needed.
-- **Per-report resolution state.** Reports currently link to
-  subjects, not to specific events. Ozone's full surface lets a
-  moderator close a particular report against a particular event;
-  we summarise instead. The schema has room to grow into it.
+- **Scheduled takedowns + age-assurance + identity-event +
+  account-revoke event types.** The registry rejects them today;
+  pick them up as needed. The v1 cut covered the operationally
+  meaningful subset (takedown / reverseTakedown / comment /
+  acknowledge / escalate / label / mute / unmute / divert / email).
+- **No /mod UI for the safelink / signature / verification / set /
+  setting / template surfaces.** They're driven entirely through
+  XRPC for now — an upstream Ozone web client would already work
+  against them, but our in-tree `/mod` doesn't surface them yet.
 
 ## Exercises
 

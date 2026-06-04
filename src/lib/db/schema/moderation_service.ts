@@ -128,6 +128,29 @@ export const labels = pgTable(
   }),
 )
 
+// ─── mod_report_resolution ────────────────────────────────────────────────
+//
+// Links each moderation_reports row to the mod_events row that closed
+// it. The /mod dashboard's "open reports" count joins against this
+// table (left-join + IS NULL) to get the exact open-set rather than
+// approximating via subject-takedown status.
+//
+// See chapter 24 — Ozone-shaped moderation.
+export const modReportResolution = pgTable(
+  'mod_report_resolution',
+  {
+    reportId: bigint('report_id', { mode: 'number' }).primaryKey(),
+    eventId: bigint('event_id', { mode: 'number' }).notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    resolvedBy: text('resolved_by'),
+  },
+  (t) => ({
+    eventIdx: index('mod_report_resolution_event_idx').on(t.eventId),
+  }),
+)
+
 export type ModTeamMember = typeof modTeam.$inferSelect
 export type NewModTeamMember = typeof modTeam.$inferInsert
 export type ModEvent = typeof modEvents.$inferSelect
@@ -136,3 +159,5 @@ export type ModSubjectStatus = typeof modSubjectStatus.$inferSelect
 export type NewModSubjectStatus = typeof modSubjectStatus.$inferInsert
 export type Label = typeof labels.$inferSelect
 export type NewLabel = typeof labels.$inferInsert
+export type ModReportResolution = typeof modReportResolution.$inferSelect
+export type NewModReportResolution = typeof modReportResolution.$inferInsert

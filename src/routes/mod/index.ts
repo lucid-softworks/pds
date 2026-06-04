@@ -7,7 +7,12 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { count, desc, eq, isNotNull, sql } from 'drizzle-orm'
 import { db } from '~/lib/db'
-import { modEvents, modSubjectStatus, moderationReports } from '~/lib/db/schema'
+import {
+  modEvents,
+  modReportResolution,
+  modSubjectStatus,
+  moderationReports,
+} from '~/lib/db/schema'
 import { readModSession } from '~/lib/mod-ui/auth'
 import {
   renderModPage,
@@ -177,23 +182,20 @@ async function loadCounts(): Promise<{
     db.select({ n: count() }).from(sql`mod_team`),
   ])
 
-  // "Open reports" is an approximation for the dashboard tile: every
-  // report whose subject doesn't have an in-force takedown. We compute
-  // it as (total reports) − (reports against currently-takendown
-  // subjects). A precise definition (per-report resolution state) is
-  // a follow-up.
-  const closedRow = await db
+  // "Open reports" is the exact count: every moderation_reports row
+  // that doesn't yet have a mod_report_resolution link. The lateral
+  // join + IS NULL filter is the canonical pattern.
+  const openRow = await db
     .select({ n: count() })
     .from(moderationReports)
-    .innerJoin(
-      modSubjectStatus,
-      sql`(${moderationReports.subjectDid} = ${modSubjectStatus.subjectDid}
-           AND ${modSubjectStatus.takedownEventId} IS NOT NULL)`,
+    .leftJoin(
+      modReportResolution,
+      sql`${modReportResolution.reportId} = ${moderationReports.id}`,
     )
+    .where(sql`${modReportResolution.reportId} IS NULL`)
 
   const totalReports = Number(totalReportsRow[0]?.n ?? 0)
-  const closed = Number(closedRow[0]?.n ?? 0)
-  const openReports = Math.max(0, totalReports - closed)
+  const openReports = Number(openRow[0]?.n ?? 0)
 
   return {
     openReports,

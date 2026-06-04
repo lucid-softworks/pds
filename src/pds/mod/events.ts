@@ -30,7 +30,9 @@ import {
   blobs,
   labels,
   modEvents,
+  modReportResolution,
   modSubjectStatus,
+  moderationReports,
   records,
 } from '~/lib/db/schema'
 
@@ -46,10 +48,10 @@ import { signBytes } from '~/pds/repo/keys'
 const REPO_REF = 'com.atproto.admin.defs#repoRef'
 const STRONG_REF = 'com.atproto.repo.strongRef'
 
-// Event types we honour in v1. The lexicon defines 25+ types; we
-// implement the operationally meaningful subset and ignore unknown
-// types with a clear error (so a v2 client tagging a future type
-// gets feedback instead of silent success).
+// Event types we honour. The lexicon defines 25+ types; we implement
+// the operationally meaningful subset and ignore unknown types with a
+// clear error (so a v2 client tagging a future type gets feedback
+// instead of silent success).
 export const SUPPORTED_EVENT_TYPES = [
   'tools.ozone.moderation.defs#modEventTakedown',
   'tools.ozone.moderation.defs#modEventReverseTakedown',
@@ -57,6 +59,10 @@ export const SUPPORTED_EVENT_TYPES = [
   'tools.ozone.moderation.defs#modEventAcknowledge',
   'tools.ozone.moderation.defs#modEventEscalate',
   'tools.ozone.moderation.defs#modEventLabel',
+  'tools.ozone.moderation.defs#modEventMute',
+  'tools.ozone.moderation.defs#modEventUnmute',
+  'tools.ozone.moderation.defs#modEventDivert',
+  'tools.ozone.moderation.defs#modEventEmail',
 ] as const
 
 const RepoRefSchema = z.object({
@@ -173,8 +179,12 @@ export async function applyEmitEvent(args: {
     }
     case 'modEventAcknowledge':
     case 'modEventEscalate':
-    case 'modEventComment': {
-      // No state side effect beyond the cache update below.
+    case 'modEventComment':
+    case 'modEventMute':
+    case 'modEventUnmute':
+    case 'modEventDivert': {
+      // No external state mutation — these flip the review_state in
+      // mod_subject_status, which the upsert below handles.
       break
     }
     case 'modEventLabel': {
@@ -183,6 +193,14 @@ export async function applyEmitEvent(args: {
         subjectFlat,
         labelSrcDid: args.labelSrcDid,
       })
+      break
+    }
+    case 'modEventEmail': {
+      // Send an email to the subject account using the existing
+      // email backend. Templates from ozone_comm_templates can be
+      // pulled by name; the event's `subjectLine` / `content` fields
+      // override the template body when set.
+      await applyEmailEvent({ event: input.event, subjectFlat })
       break
     }
   }
@@ -194,6 +212,24 @@ export async function applyEmitEvent(args: {
     eventId: row.id,
     comment,
   })
+
+  // Auto-resolve open reports against the subject when a closing
+  // event lands. The three closing actions are takedown,
+  // acknowledge, and divert; anything else (comment, escalate, label,
+  // email, mute) leaves reports open. The link is idempotent — a
+  // second action against the same already-resolved report is a
+  // no-op via ON CONFLICT DO NOTHING.
+  if (
+    eventType === 'modEventTakedown' ||
+    eventType === 'modEventAcknowledge' ||
+    eventType === 'modEventDivert'
+  ) {
+    await resolveOpenReports({
+      subjectFlat,
+      eventId: row.id,
+      resolvedBy: input.createdBy,
+    })
+  }
 
   return {
     id: row.id,
@@ -309,6 +345,85 @@ async function applyReverseTakedown(
   }
 }
 
+async function applyEmailEvent(args: {
+  event: { $type: string; [k: string]: unknown }
+  subjectFlat: { did: string; uri: string | null; cid: string | null }
+}): Promise<void> {
+  // Email only makes sense for account-level subjects.
+  if (!args.subjectFlat.did || args.subjectFlat.uri !== null) {
+    throw BadRequest(
+      'modEventEmail requires an account subject (repoRef)',
+      'InvalidRequest',
+    )
+  }
+  // Resolve the target account's address.
+  const targetRows = await db
+    .select({ email: accounts.email, status: accounts.status })
+    .from(accounts)
+    .where(eq(accounts.did, args.subjectFlat.did))
+    .limit(1)
+  const target = targetRows[0]
+  if (!target) {
+    throw NotFound(
+      `account not found: ${args.subjectFlat.did}`,
+      'SubjectNotFound',
+    )
+  }
+  if (target.status === 'deleted') {
+    throw BadRequest(
+      'cannot email a deleted account',
+      'InvalidRequest',
+    )
+  }
+
+  const subjectLine =
+    (args.event.subjectLine as string | undefined) ??
+    'A message from your moderation team'
+  let body = (args.event.content as string | undefined) ?? ''
+  const templateName = args.event.templateName as string | undefined
+
+  // If a template was named and no inline content was supplied, fall
+  // back to the template's content_markdown. The lexicon allows either
+  // direction; we never overwrite an inline body with the template.
+  if (templateName !== undefined && body.length === 0) {
+    const { ozoneCommTemplates } = await import('~/lib/db/schema')
+    const tpl = (
+      await db
+        .select()
+        .from(ozoneCommTemplates)
+        .where(eq(ozoneCommTemplates.name, templateName))
+        .limit(1)
+    )[0]
+    if (!tpl) {
+      throw NotFound(
+        `communication template not found: ${templateName}`,
+        'TemplateNotFound',
+      )
+    }
+    if (tpl.disabled) {
+      throw BadRequest(
+        `template is disabled: ${templateName}`,
+        'TemplateDisabled',
+      )
+    }
+    body = tpl.contentMarkdown
+  }
+
+  if (body.length === 0) {
+    throw BadRequest(
+      'modEventEmail requires content or a non-empty template',
+      'InvalidRequest',
+    )
+  }
+
+  const { getEmailBackend } = await import('~/pds/auth/email_sender')
+  await getEmailBackend().send({
+    to: target.email,
+    subject: subjectLine,
+    body,
+  })
+}
+
 async function applyLabel(args: {
   event: { $type: string; [k: string]: unknown }
   subjectFlat: { did: string; uri: string | null; cid: string | null }
@@ -411,6 +526,40 @@ async function insertSignedLabel(args: {
   })
 }
 
+async function resolveOpenReports(args: {
+  subjectFlat: { did: string; uri: string | null; cid: string | null }
+  eventId: number
+  resolvedBy: string
+}): Promise<void> {
+  // Find every report against this subject that doesn't yet have a
+  // resolution row, then insert the link in one batch.
+  const subjectFilter =
+    args.subjectFlat.uri !== null
+      ? eq(moderationReports.subjectUri, args.subjectFlat.uri)
+      : eq(moderationReports.subjectDid, args.subjectFlat.did)
+  const open = await db
+    .select({ id: moderationReports.id })
+    .from(moderationReports)
+    .leftJoin(
+      modReportResolution,
+      eq(modReportResolution.reportId, moderationReports.id),
+    )
+    .where(
+      and(subjectFilter, sql`${modReportResolution.reportId} IS NULL`),
+    )
+  if (open.length === 0) return
+  await db
+    .insert(modReportResolution)
+    .values(
+      open.map((r) => ({
+        reportId: r.id,
+        eventId: args.eventId,
+        resolvedBy: args.resolvedBy,
+      })),
+    )
+    .onConflictDoNothing({ target: modReportResolution.reportId })
+}
+
 async function upsertSubjectStatus(args: {
   subjectType: string
   subjectFlat: { did: string; uri: string | null; cid: string | null }
@@ -443,7 +592,13 @@ async function upsertSubjectStatus(args: {
       ? 'acknowledged'
       : args.eventType === 'modEventEscalate'
         ? 'escalated'
-        : null
+        : args.eventType === 'modEventMute'
+          ? 'muted'
+          : args.eventType === 'modEventUnmute'
+            ? 'open'
+            : args.eventType === 'modEventDivert'
+              ? 'diverted'
+              : null
 
   if (existing.length === 0) {
     await db.insert(modSubjectStatus).values({
