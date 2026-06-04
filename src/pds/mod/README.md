@@ -24,7 +24,7 @@ narrative; this file is the in-tree map.
 
 | Group | Endpoints |
 | --- | --- |
-| `tools.ozone.moderation.*` | emitEvent (16 event types) · queryEvents · queryStatuses · getEvent · getRepo · getRecord · getRepos · getRecords · getSubjects · getAccountTimeline · getReporterStats · searchRepos |
+| `tools.ozone.moderation.*` | emitEvent (16 event types) · queryEvents · queryStatuses · getEvent · getRepo · getRecord · getRepos · getRecords · getSubjects · getAccountTimeline · getReporterStats · searchRepos · scheduleAction · listScheduledActions · cancelScheduledActions |
 | `tools.ozone.team.*` | listMembers · addMember · updateMember · deleteMember |
 | `tools.ozone.setting.*` | upsertOption · listOptions · removeOptions |
 | `tools.ozone.set.*` | upsertSet · deleteSet · querySets · getValues · addValues · deleteValues |
@@ -44,8 +44,10 @@ Lives in `../../lib/db/schema/moderation_service.ts` and
 | --- | --- |
 | `mod_team` | Roster — DIDs authorised to operate the moderation surface, with `role` ∈ {`lead`, `moderator`}. |
 | `mod_events` | Append-only event log. Every `emitEvent` call writes one row, with the full DAG-CBOR snapshot of the original input in `metadata` for fidelity. |
-| `mod_subject_status` | Cache of the current state per subject (powering `queryStatuses` without replaying the log). |
+| `mod_subject_status` | Cache of the current state per subject (powering `queryStatuses` without replaying the log). Includes `tags[]`, `priority_score`, `appeal_state` columns set by their respective event types. |
+| `mod_muted_reporters` | DIDs whose reports are de-emphasised in the queue. Flipped by `modEventMuteReporter` / `Unmute`. |
 | `mod_report_resolution` | Links each `moderation_reports` row to the `mod_events` row that closed it. Auto-populated when a takedown / acknowledge / divert event is emitted. |
+| `mod_scheduled_actions` | Deferred-execution moderation actions. The background sweep (`scheduled_actions.ts`) fires due rows via `applyEmitEvent`. |
 | `labels` | Signed atproto labels emitted by `modEventLabel`. Public-readable via `com.atproto.label.queryLabels` / `subscribeLabels`. |
 | `ozone_settings` | Key/value/scope store for `tools.ozone.setting.*`. |
 | `ozone_sets` + `ozone_set_values` | Named subject sets for `tools.ozone.set.*`. |

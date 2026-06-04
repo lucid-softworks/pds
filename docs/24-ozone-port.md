@@ -245,6 +245,18 @@ Three XRPC handlers cover the read side:
   moderators need to see what they're moderating.
 - `tools.ozone.moderation.getRecord` — same shape for a single
   record, keyed by AT-URI. Also serves takendown records.
+- `tools.ozone.moderation.getRepos` / `getRecords` / `getSubjects` —
+  batched variants of the above, up to 50–100 entries per call.
+  Mirror input order in the output; missing entries surface as
+  `repoViewNotFound` / `recordViewNotFound`.
+- `tools.ozone.moderation.getAccountTimeline` — merged stream of
+  reports + events + labels for one account, sorted by createdAt
+  desc. Each entry is tagged `kind: 'report' | 'event' | 'label'`.
+- `tools.ozone.moderation.searchRepos` — substring search over
+  `accounts.handle` and `accounts.email`, plus exact match by DID.
+- `tools.ozone.moderation.getReporterStats` — per-DID summary
+  (`reportedCount`, `resolvedCount`, `isMuted`) for up to 100 DIDs
+  in one call.
 
 The event view is reconstructed from the DAG-CBOR snapshot
 `emitEvent` persisted, so the response shape matches exactly what the
