@@ -87,7 +87,11 @@ function HomePage() {
 
       </section>
 
-      <HostPanel host={stats.host} />
+      <HostPanel
+        host={stats.host}
+        blobBytes={stats.content.blobs.bytes}
+        blobCount={stats.content.blobs.count}
+      />
 
       <section className="mt-12 grid gap-4 md:grid-cols-2">
         <LinkCard title="Read the docs" href="/docs" internal>
@@ -153,7 +157,15 @@ function StatCard({
   )
 }
 
-function HostPanel({ host }: { host: PdsStats['host'] }) {
+function HostPanel({
+  host,
+  blobBytes,
+  blobCount,
+}: {
+  host: PdsStats['host']
+  blobBytes: number
+  blobCount: number
+}) {
   const memPct = formatPercent(host.memory.used, host.memory.total)
   const heapPct = formatPercent(host.process.heapUsed, host.process.heapTotal)
   const diskPct = host.blobDisk
@@ -189,12 +201,14 @@ function HostPanel({ host }: { host: PdsStats['host'] }) {
           <HostLine k="heap" v={`${formatBytes(host.process.heapUsed)} / ${formatBytes(host.process.heapTotal)} (${heapPct})`} />
         </HostGroup>
 
-        <HostGroup title="Blob storage">
+        <HostGroup title="Disk">
           {host.blobDisk ? (
             <>
               <HostLine k="mount" v={host.blobDisk.mount} mono />
-              <HostLine k="used" v={`${formatBytes(host.blobDisk.used)} / ${formatBytes(host.blobDisk.total)}`} />
-              <HostLine k="usage" v={diskPct ?? '—'} />
+              <HostLine k="fs used" v={`${formatBytes(host.blobDisk.used)} / ${formatBytes(host.blobDisk.total)}`} />
+              <HostLine k="fs usage" v={diskPct ?? '—'} />
+              <HostSpacer />
+              <HostLine k="blob data" v={`${formatBytes(blobBytes)} (${formatCount(blobCount)} ${blobCount === 1 ? 'file' : 'files'})`} />
             </>
           ) : (
             <p className="text-xs text-[var(--color-fg-muted)]">
